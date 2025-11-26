@@ -5,21 +5,44 @@ import threading
 import serial.tools.list_ports 
 
 # --- Import widoków ---
-from gui.cartesian import CartesianView
-from gui.jog import JogView
-from gui.settings import SettingsView 
-from gui.status import StatusView 
-from gui.errors import ErrorsView
+# Upewnij się, że masz te pliki w folderze 'gui'
+try:
+    from gui.cartesian import CartesianView
+    from gui.jog import JogView
+    from gui.settings import SettingsView 
+    from gui.status import StatusView 
+    from gui.errors import ErrorsView
+    from gui.communication import UARTCommunicator
+except ImportError as e:
+    print(f"Błąd importu modułów GUI: {e}")
+    # Fallback dla testów, jeśli brakuje plików
+    CartesianView = JogView = SettingsView = StatusView = ErrorsView = UARTCommunicator = None
+
 from PIL import Image
-from gui.communication import UARTCommunicator
 
 def main(page: ft.Page):
     # --- Ustawienia strony ---
     page.title = "PAROL6 Operator Panel by Jakub Grzebień"
     page.theme_mode = ft.ThemeMode.DARK 
     
+    # --- NOWOŚĆ: Ustawienia rozmiaru okna ---
+    page.window_width = 1024
+    page.window_height = 600
+    page.window_resizable = False # Zablokowanie zmiany rozmiaru (opcjonalne)
+    page.window_maximizable = False # Zablokowanie maksymalizacji (opcjonalne)
+    
     # Inicjalizacja komunikatora
-    communicator = UARTCommunicator()
+    # Obsługa błędu jeśli klasa nie została zaimportowana
+    if UARTCommunicator:
+        communicator = UARTCommunicator()
+    else:
+        class DummyComm:
+            def is_open(self): return False
+            def connect(self, port): return False
+            def disconnect(self): pass
+            def send_message(self, msg): print(f"Dummy send: {msg}")
+            on_data_received = None
+        communicator = DummyComm()
     
     page.bgcolor = "#1C1C1C"
     page.padding = 10 
@@ -77,8 +100,8 @@ def main(page: ft.Page):
             dd_ports.disabled = False
             
             # Aktualizacja statusu w widoku STATUS (jeśli istnieje)
-            if "STATUS" in views:
-                views["STATUS"].update_status("Stan połączenia", "Rozłączono", ft.Colors.GREY_400)
+            if "STATUS" in views and views["STATUS"]:
+                views["STATUS"].update_status("Stan połączenia", "Rozłączono", ft.colors.GREY_400)
                 
         else:
             selected_port = dd_ports.value
@@ -90,8 +113,8 @@ def main(page: ft.Page):
                     dd_ports.disabled = True
                     
                     # Aktualizacja statusu w widoku STATUS
-                    if "STATUS" in views:
-                        views["STATUS"].update_status("Stan połączenia", "Połączono", ft.Colors.GREEN_400)
+                    if "STATUS" in views and views["STATUS"]:
+                        views["STATUS"].update_status("Stan połączenia", "Połączono", ft.colors.GREEN_400)
             else:
                 print("Nie wybrano portu!")
         page.update()
@@ -200,23 +223,27 @@ def main(page: ft.Page):
     
 # 1. Definiujemy funkcję pomocniczą (Mostek)
     def global_status_updater(key, value, color=None):
-        if "STATUS" in views:
+        if "STATUS" in views and views["STATUS"]:
             views["STATUS"].update_status(key, value, color)
 
     # 2. Tworzymy widoki i przekazujemy im ten mostek
-    views = {
-        # PRZEKAZUJEMY FUNKCJĘ DO JOGVIEW:
-        "JOG": JogView(uart_communicator=communicator, on_status_update=global_status_updater),
-        
-        "CARTESIAN": CartesianView(
+    # Inicjalizujemy tylko te, które udało się zaimportować
+    views = {}
+    
+    if JogView:
+        views["JOG"] = JogView(uart_communicator=communicator, on_status_update=global_status_updater)
+    if CartesianView:
+        views["CARTESIAN"] = CartesianView(
             urdf_path="resources/PAROL6.urdf",
             active_links_mask=[False, True, True, True, True, True, True],
             uart_communicator=communicator
-        ),
-        "SETTINGS": SettingsView(uart_communicator=communicator), 
-        "STATUS": StatusView(uart_communicator=communicator),
-        "ERRORS": ErrorsView()
-    }
+        )
+    if SettingsView:
+        views["SETTINGS"] = SettingsView(uart_communicator=communicator)
+    if StatusView:
+        views["STATUS"] = StatusView(uart_communicator=communicator)
+    if ErrorsView:
+        views["ERRORS"] = ErrorsView()
 
     def handle_uart_data(data_string):
         # 1. Czyszczenie danych (usuwamy spacje i znaki nowej linii)
@@ -231,23 +258,23 @@ def main(page: ft.Page):
         # 2. NAJPIERW SPRAWDZAMY KOMENDY TEKSTOWE (POMPA / ZAWÓR)
         # ==========================================================
         if "VAC_ON" in data_string:
-            if "STATUS" in views:
-                views["STATUS"].update_status("Pompa", "WŁĄCZONA", ft.Colors.GREEN_400)
+            if "STATUS" in views and views["STATUS"]:
+                views["STATUS"].update_status("Pompa", "WŁĄCZONA", ft.colors.GREEN_400)
             return  # Kończymy, bo to była komenda, a nie ciśnienie
 
         if "VAC_OFF" in data_string:
-            if "STATUS" in views:
-                views["STATUS"].update_status("Pompa", "WYŁĄCZONA", ft.Colors.RED_400)
+            if "STATUS" in views and views["STATUS"]:
+                views["STATUS"].update_status("Pompa", "WYŁĄCZONA", ft.colors.RED_400)
             return
 
         if "VALVEON" in data_string:
-            if "STATUS" in views:
-                views["STATUS"].update_status("Zawór", "ZAMKNIĘTY", ft.Colors.ORANGE_400)
+            if "STATUS" in views and views["STATUS"]:
+                views["STATUS"].update_status("Zawór", "ZAMKNIĘTY", ft.colors.ORANGE_400)
             return
 
         if "VALVEOFF" in data_string:
-            if "STATUS" in views:
-                views["STATUS"].update_status("Zawór", "OTWARTY", ft.Colors.GREEN_400)
+            if "STATUS" in views and views["STATUS"]:
+                views["STATUS"].update_status("Zawór", "OTWARTY", ft.colors.GREEN_400)
             return
 
         # ==========================================================
@@ -258,9 +285,9 @@ def main(page: ft.Page):
             pressure_val = float(data_string)
             
             # Jeśli się udało -> Aktualizujemy STATUS
-            if "STATUS" in views:
+            if "STATUS" in views and views["STATUS"]:
                 # WAŻNE: Upewnij się, że w status.py masz wiersz o nazwie "Ciśnienie"
-                views["STATUS"].update_status("Ciśnienie", f"{pressure_val:.2f} kPa", ft.Colors.CYAN_400)
+                views["STATUS"].update_status("Ciśnienie", f"{pressure_val:.2f} kPa", ft.colors.CYAN_400)
             return
 
         except ValueError:
@@ -273,7 +300,7 @@ def main(page: ft.Page):
         if data_string.startswith("P:"):
             try:
                 val = data_string.split(":")[1].strip()
-                if "STATUS" in views:
+                if "STATUS" in views and views["STATUS"]:
                     views["STATUS"].update_status("Ciśnienie", val)
             except: pass
 
@@ -294,9 +321,9 @@ def main(page: ft.Page):
         if mode_name in views:
             frame_middle.content = views[mode_name]
         else:
-            frame_middle.content = ft.Text("Nieznany widok", size=50, color="red")
+            frame_middle.content = ft.Text(f"Brak widoku: {mode_name}", size=30, color="red")
             
-        if mode_name == "SETTINGS":
+        if mode_name == "SETTINGS" and "SETTINGS" in views:
             views["SETTINGS"].reset_view()
         
         frame_middle.alignment = ft.alignment.center
@@ -354,7 +381,10 @@ def main(page: ft.Page):
                 needs_update = True
             
             if needs_update:
-                page.update() 
+                try:
+                    page.update()
+                except:
+                    pass 
             time.sleep(1)
 
     t = threading.Thread(target=clock_updater, daemon=True)
@@ -362,7 +392,11 @@ def main(page: ft.Page):
     
     # Ustawienie domyślnego widoku
     current_mode_text.value = "JOG"
-    frame_middle.content = views["JOG"]
+    if "JOG" in views:
+        frame_middle.content = views["JOG"]
+    else:
+        frame_middle.content = ft.Text("Widok JOG niedostępny", color="red")
+        
     frame_middle.alignment = ft.alignment.center
 
     page.update()
@@ -377,9 +411,6 @@ if __name__ == "__main__":
     os.makedirs(gui_dir, exist_ok=True)
     init_py = os.path.join(gui_dir, "__init__.py")
     if not os.path.exists(init_py): open(init_py, 'a').close()
-    
-    settings_py = os.path.join(gui_dir, "settings.py")
-    if not os.path.exists(settings_py): open(settings_py, 'a').close()
     
     # Placeholder AT.png
     at_img_path = os.path.join(resources_dir, "AT.png")
