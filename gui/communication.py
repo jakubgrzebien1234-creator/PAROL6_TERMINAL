@@ -5,8 +5,8 @@ import time
 
 class UARTCommunicator:
     """
-    Zarządza komunikacją UART.
-    Teraz obsługuje mechanizm REQUEST -> RESPONSE (Czekanie na "OK").
+    Zarządza komunikacją UART w trybie asynchronicznym (Fire & Forget).
+    Wysyła komendy bez czekania na potwierdzenie "OK".
     """
     
     def __init__(self, baudrate=9600, timeout=1):
@@ -17,12 +17,10 @@ class UARTCommunicator:
         self.is_running = False
         self.read_thread = None
         
-        # Callback dla GUI
+        # Callback dla GUI - tutaj trafiają WSZYSTKIE odebrane linie
         self.on_data_received = None
 
-        # --- NOWOŚĆ: Zdarzenie do synchronizacji "OK" ---
-        # To flaga, którą wątek odczytu podniesie, gdy zobaczy "OK"
-        self.response_event = threading.Event()
+        # USUNIĘTO: self.response_event (nie jest już potrzebne)
 
     def find_port(self):
         """Pomocnicza funkcja do znajdowania dostępnych portów."""
@@ -84,7 +82,7 @@ class UARTCommunicator:
 
     def _read_loop(self):
         """
-        Wątek czytający. Teraz wyłapuje "OK" i daje znać funkcji send_message.
+        Wątek czytający. Po prostu czyta wszystko co wpadnie i wysyła do GUI.
         """
         while self.is_running:
             if not self.is_open():
@@ -98,12 +96,9 @@ class UARTCommunicator:
                     if line:
                         decoded_line = line.decode('utf-8', errors='ignore').strip()
                         
-                        # --- NOWOŚĆ: Wykrywanie potwierdzenia ---
-                        if decoded_line == "OK":
-                            # Sygnalizujemy, że przyszło potwierdzenie!
-                            self.response_event.set()
-                        
-                        # Przekazujemy dalej do GUI (logi, wykresy itp.)
+                        # USUNIĘTO: Wykrywanie "OK" i triggerowanie eventu.
+                        # Teraz po prostu przekazujemy wszystko jak leci.
+
                         if decoded_line and self.on_data_received:
                             self.on_data_received(decoded_line)
                             
@@ -111,49 +106,32 @@ class UARTCommunicator:
                 print(f"Błąd w pętli odczytu: {e}")
                 time.sleep(0.01)
 
-    def send_message(self, message, wait_for_ack=True, ack_timeout=1.0):
+    def send_message(self, message):
         """
-        Wysyła wiadomość i czeka na "OK" od STM32.
+        Wysyła wiadomość natychmiastowo.
+        Nie czeka na żadną odpowiedź, nie blokuje programu.
         
         :param message: Treść komendy
-        :param wait_for_ack: Czy czekać na 'OK'
-        :param ack_timeout: Ile sekund czekać zanim uznamy błąd
-        :return: True jeśli wysłano i (opcjonalnie) otrzymano OK. False przy błędzie.
+        :return: True jeśli wysłano (technicznie, do bufora), False przy błędzie połączenia.
         """
         if not self.is_open():
             print("BŁĄD: Brak połączenia.")
             return False
             
         try:
-            # 1. Czyścimy flagę zdarzenia (resetujemy "stoper")
-            self.response_event.clear()
+            # USUNIĘTO: self.response_event.clear()
+            # USUNIĘTO: self.serial_connection.reset_input_buffer() 
+            # (nie czyścimy bufora, bo możemy stracić dane przychodzące asynchronicznie)
 
-            # 2. Czyścimy bufor wejściowy (usuwamy stare śmieci, żeby nie pomylić starego OK z nowym)
-            self.serial_connection.reset_input_buffer()
-
-            # 3. Wysyłanie
             clean_message = message.strip() + '\n'
             self.serial_connection.write(clean_message.encode('utf-8'))
             self.serial_connection.flush()
             
             print(f"Wysłano: {clean_message.strip()}")
 
-            if not wait_for_ack:
-                # Jeśli to jakaś komenda, która nie zwraca OK, po prostu wychodzimy
-                time.sleep(0.05) # Mała pauza techniczna
-                return True
-
-            # 4. OCZEKIWANIE NA "OK"
-            # wait() zablokuje ten wątek aż _read_loop zrobi set() lub minie czas ack_timeout
-            # To jest dużo lepsze niż time.sleep(), bo reaguje natychmiast!
-            ack_received = self.response_event.wait(timeout=ack_timeout)
-
-            if ack_received:
-                # print("Potwierdzono (OK)") # Opcjonalnie
-                return True
-            else:
-                print(f"TIMEOUT: Nie otrzymano 'OK' dla komendy '{clean_message.strip()}' w ciągu {ack_timeout}s")
-                return False
+            # USUNIĘTO: Oczekiwanie na response_event.wait()
+            
+            return True
 
         except Exception as e:
             print(f"BŁĄD wysyłania: {e}")
