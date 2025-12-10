@@ -4,32 +4,22 @@ import threading
 import time
 
 class UARTCommunicator:
-    """
-    Zarządza komunikacją UART w trybie asynchronicznym (Fire & Forget).
-    Wysyła komendy bez czekania na potwierdzenie "OK".
-    """
-    
-    def __init__(self, baudrate=9600, timeout=1):
+    def __init__(self, baudrate=115200, timeout=0.1): # Zmniejszyłem timeout dla szybszej reakcji
         self.port = None
         self.baudrate = baudrate
         self.timeout = timeout
         self.serial_connection = None
         self.is_running = False
         self.read_thread = None
-        
-        # Callback dla GUI - tutaj trafiają WSZYSTKIE odebrane linie
-        self.on_data_received = None
-
-        # USUNIĘTO: self.response_event (nie jest już potrzebne)
+        self.on_data_received = None # Callback
 
     def find_port(self):
-        """Pomocnicza funkcja do znajdowania dostępnych portów."""
         ports = serial.tools.list_ports.comports()
         available_ports = [p.device for p in ports]
-        print(f"Dostępne porty: {available_ports}")
+        print(f"[UART] Dostępne porty: {available_ports}")
         if available_ports:
             self.port = available_ports[0]
-            print(f"Wybrano domyślny port: {self.port}")
+            print(f"[UART] Wybrano domyślny port: {self.port}")
             return self.port
         return None
 
@@ -41,13 +31,11 @@ class UARTCommunicator:
             self.find_port()
             
         if not self.port:
-            print("BŁĄD: Nie znaleziono żadnego portu szeregowego.")
+            print("[UART] BŁĄD: Brak portu.")
             return False
-            
-        if self.serial_connection and self.serial_connection.is_open:
-            return True
 
         try:
+            # WAŻNE: timeout=0.05 sprawia, że read() nie blokuje programu na wieki
             self.serial_connection = serial.Serial(
                 self.port, self.baudrate, timeout=self.timeout
             )
@@ -56,25 +44,21 @@ class UARTCommunicator:
             self.read_thread = threading.Thread(target=self._read_loop, daemon=True)
             self.read_thread.start()
             
-            print(f"Połączono z {self.port} przy {self.baudrate} baud.")
+            print(f"[UART] SUKCES: Połączono z {self.port}")
             return True
         except serial.SerialException as e:
-            print(f"BŁĄD: Nie można otworzyć portu {self.port}. {e}")
+            print(f"[UART] BŁĄD OTWARCIA PORTU: {e}")
             self.serial_connection = None
             return False
 
     def disconnect(self):
         self.is_running = False
-        if self.read_thread and self.read_thread.is_alive():
-            self.read_thread.join(timeout=1)
-            
-        if self.serial_connection and self.serial_connection.is_open:
+        if self.serial_connection:
             try:
                 self.serial_connection.close()
-                print("Rozłączono.")
-            except Exception as e:
-                print(f"Błąd podczas zamykania portu: {e}")
-                
+                print("[UART] Rozłączono.")
+            except:
+                pass
         self.serial_connection = None
 
     def is_open(self):
@@ -82,57 +66,55 @@ class UARTCommunicator:
 
     def _read_loop(self):
         """
-        Wątek czytający. Po prostu czyta wszystko co wpadnie i wysyła do GUI.
+        Czyta dane w pętli. Zmienione na bardziej niezawodne czytanie.
         """
+        print("[UART] Wątek nasłuchujący wystartował.")
+        
         while self.is_running:
             if not self.is_open():
-                time.sleep(0.1)
+                time.sleep(0.5)
                 continue
                 
             try:
+                # Sprawdzamy czy są dane w buforze
                 if self.serial_connection.in_waiting > 0:
-                    line = self.serial_connection.readline()
+                    # Czytamy wszystko co jest, zamiast czekać na \n
+                    # To eliminuje problem, jeśli STM nie wysyła entera
+                    raw_data = self.serial_connection.read(self.serial_connection.in_waiting)
                     
-                    if line:
-                        decoded_line = line.decode('utf-8', errors='ignore').strip()
-                        
-                        # USUNIĘTO: Wykrywanie "OK" i triggerowanie eventu.
-                        # Teraz po prostu przekazujemy wszystko jak leci.
-
-                        if decoded_line and self.on_data_received:
-                            self.on_data_received(decoded_line)
+                    if raw_data:
+                        try:
+                            # Próba dekodowania
+                            decoded_chunk = raw_data.decode('utf-8', errors='ignore')
+                           # print(f"[UART RAW] Odebrano: {repr(decoded_chunk)}") # Pokaże ukryte znaki np \n \r
                             
+                            # Tu jest prosty trik: jeśli dane przychodzą w kawałkach,
+                            # to parsowanie może być trudne, ale na razie zobaczmy czy COKOLWIEK wpada.
+                            # Zakładamy, że STM wysyła linie.
+                            
+                            lines = decoded_chunk.split('\n')
+                            for line in lines:
+                                line = line.strip()
+                                if line and self.on_data_received:
+                                    # WYWOŁANIE CALLBACKA
+                                    self.on_data_received(line)
+                                    
+                        except Exception as decode_error:
+                            print(f"[UART] Błąd dekodowania: {decode_error}")
+
             except Exception as e:
-                print(f"Błąd w pętli odczytu: {e}")
-                time.sleep(0.01)
+                print(f"[UART] Błąd w pętli: {e}")
+                time.sleep(0.1)
+            
+            time.sleep(0.01) # Lekki oddech dla procesora
 
     def send_message(self, message):
-        """
-        Wysyła wiadomość natychmiastowo.
-        Nie czeka na żadną odpowiedź, nie blokuje programu.
-        
-        :param message: Treść komendy
-        :return: True jeśli wysłano (technicznie, do bufora), False przy błędzie połączenia.
-        """
-        if not self.is_open():
-            print("BŁĄD: Brak połączenia.")
-            return False
-            
+        if not self.is_open(): return False
         try:
-            # USUNIĘTO: self.response_event.clear()
-            # USUNIĘTO: self.serial_connection.reset_input_buffer() 
-            # (nie czyścimy bufora, bo możemy stracić dane przychodzące asynchronicznie)
-
             clean_message = message.strip() + '\n'
             self.serial_connection.write(clean_message.encode('utf-8'))
-            self.serial_connection.flush()
-            
-            print(f"Wysłano: {clean_message.strip()}")
-
-            # USUNIĘTO: Oczekiwanie na response_event.wait()
-            
+            print(f"[UART TX] Wysłano: {clean_message.strip()}")
             return True
-
         except Exception as e:
-            print(f"BŁĄD wysyłania: {e}")
+            print(f"[UART TX ERROR] {e}")
             return False

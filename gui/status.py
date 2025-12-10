@@ -2,12 +2,13 @@ import flet
 from flet import Column, Row, Container, Text, alignment, Colors, MainAxisAlignment, ScrollMode, padding, border
 
 class StatusView(flet.Container):
-    def __init__(self, uart_communicator=None): 
+    def __init__(self): 
         super().__init__()
         
-        self.uart = uart_communicator 
-        
-        # --- USTAWIENIA GŁÓWNE ---
+        # NOTE: self.uart and parse_data removed.
+        # Now main.py controls this view using update_status().
+
+        # --- MAIN SETTINGS ---
         self.expand = True
         self.padding = 5
         self.bgcolor = "#2D2D2D"
@@ -15,28 +16,35 @@ class StatusView(flet.Container):
         self.value_controls = {}
 
         # ======================================================================
-        # === LEWA KOLUMNA (Z PNEUMATYKĄ) ===
+        # === LEFT COLUMN (Power, Temperatures, Pneumatics) ===
         # ======================================================================
         self.left_column_content = Column(
             controls=[
-                self._create_header("ZASILANIE"),
-                self._create_status_row("Napięcie baterii", "12.4 V"),
-                self._create_status_row("Pobór prądu", "1.2 A"),
-                self._create_status_row("Temp. sterownika", "45°C"),
+                # --- 1. POWER (Data from PROT_) ---
+                self._create_header("POWER STATUS"),
+                self._create_status_row("3.3V Rail", "--", key="PWR3V3"),
+                self._create_status_row("5.0V Rail", "--", key="PWR5V"),
+                self._create_status_row("Power OK",   "--", key="PWROK"),
+                self._create_status_row("Power Stat", "--", key="PWRSTAT"),
                 
-                # --- SEKCJA PNEUMATYKA ---
-                self._create_header("PNEUMATYKA"),
-                self._create_status_row("Ciśnienie", "0.00 kPa", color=Colors.CYAN_400),
+                # --- 2. TEMPERATURES (Data from PROT_) ---
+                self._create_header("TEMPERATURES (NTC)"),
+                self._create_status_row("Sensor T1", "0.00 °C", color=Colors.ORANGE_300, key="TEMP1"),
+                self._create_status_row("Sensor T2", "0.00 °C", color=Colors.ORANGE_300, key="TEMP2"),
+                self._create_status_row("Sensor T3", "0.00 °C", color=Colors.ORANGE_300, key="TEMP3"),
+                self._create_status_row("Sensor T4", "0.00 °C", color=Colors.ORANGE_300, key="TEMP4"),
                 
-                # NOWE ELEMENTY:
-                self._create_status_row("Pompa", "WYŁĄCZONA", color=Colors.RED_400),
-                self._create_status_row("Zawór", "OTWARTY", color=Colors.GREEN_400),
-                # -------------------------
+                # --- 3. PNEUMATICS ---
+                self._create_header("PNEUMATICS"),
+                self._create_status_row("Pressure", "0.00 kPa", color=Colors.CYAN_400, key="CISNIENIE"),
+                self._create_status_row("Pump", "OFF", color=Colors.RED_400, key="POMPA"),
+                self._create_status_row("Valve", "OPEN", color=Colors.GREEN_400, key="ZAWOR"),
 
-                self._create_header("STATUS SYSTEMU"),
-                self._create_status_row("Stan połączenia", "Rozłączono", color=Colors.GREY_400),
-                self._create_status_row("Tryb pracy", "Manualny", color=Colors.BLUE_400),
-                self._create_status_row("Ostatni błąd", "Brak", color=Colors.GREY_400),
+                # --- 4. GENERAL STATUS ---
+                self._create_header("SYSTEM STATUS"),
+                self._create_status_row("Connection", "Disconnected", color=Colors.GREY_400, key="CONN_STAT"),
+                self._create_status_row("Op. Mode", "Manual", color=Colors.BLUE_400, key="OP_MODE"),
+                self._create_status_row("Last Error", "None", color=Colors.GREY_400, key="LAST_ERR"),
             ],
             scroll=ScrollMode.ADAPTIVE,
             spacing=5,
@@ -44,29 +52,34 @@ class StatusView(flet.Container):
         )
 
         # ======================================================================
-        # === PRAWA KOLUMNA (Bez zmian) ===
+        # === RIGHT COLUMN (Limit Switches and StallGuard) ===
         # ======================================================================
         self.right_column_content = Column(
             controls=[
-                self._create_header("POZYCJA ROBOTA (Kątowa)"),
-                self._create_status_row("Oś J1", "0.00°"),
-                self._create_status_row("Oś J2", "-45.50°"),
-                self._create_status_row("Oś J3", "90.00°"),
-                self._create_status_row("Oś J4", "0.00°"),
-                self._create_status_row("Oś J5", "10.00°"),
-                self._create_status_row("Oś J6", "0.00°"),
+                # --- 1. LIMIT SWITCHES ---
+                self._create_header("LIMIT SWITCHES"),
+                self._create_status_row("Limit Switch J1", "RELEASED", color=Colors.GREEN_400, key="LS1"),
+                self._create_status_row("Limit Switch J2", "RELEASED", color=Colors.GREEN_400, key="LS2"),
+                self._create_status_row("Limit Switch J3", "RELEASED", color=Colors.GREEN_400, key="LS3"),
+                self._create_status_row("Limit Switch J4", "RELEASED", color=Colors.GREEN_400, key="LS4"),
+                self._create_status_row("Limit Switch J5", "RELEASED", color=Colors.GREEN_400, key="LS5"),
+                self._create_status_row("Limit Switch J6", "RELEASED", color=Colors.GREEN_400, key="LS6"),
 
-                self._create_header("POZYCJA XYZ"),
-                self._create_status_row("X [mm]", "150.0"),
-                self._create_status_row("Y [mm]", "200.5"),
-                self._create_status_row("Z [mm]", "50.0"),
+                # --- 2. COLLISIONS ---
+                self._create_header("COLLISIONS (StallGuard)"),
+                self._create_status_row("Axis J1", "NONE", color=Colors.GREEN_400, key="SG1"),
+                self._create_status_row("Axis J2", "NONE", color=Colors.GREEN_400, key="SG2"),
+                self._create_status_row("Axis J3", "NONE", color=Colors.GREEN_400, key="SG3"),
+                self._create_status_row("Axis J4", "NONE", color=Colors.GREEN_400, key="SG4"),
+                self._create_status_row("Axis J5", "NONE", color=Colors.GREEN_400, key="SG5"),
+                self._create_status_row("Axis J6", "NONE", color=Colors.GREEN_400, key="SG6")     
             ],
             scroll=ScrollMode.ADAPTIVE,
             spacing=5,
             expand=True
         )
 
-        # --- STYL RAMEK ---
+        # Frame styles
         frame_style = {
             "bgcolor": "#2D2D2D",
             "border_radius": 10,
@@ -75,9 +88,7 @@ class StatusView(flet.Container):
             "expand": True,
         }
 
-        # ======================================================================
-        # === GŁÓWNY UKŁAD ===
-        # ======================================================================
+        # Main Layout
         self.content = Row(
             controls=[
                 Container(content=self.left_column_content, **frame_style),
@@ -88,13 +99,34 @@ class StatusView(flet.Container):
             vertical_alignment=flet.CrossAxisAlignment.STRETCH
         )
 
+    # ======================================================================
+    # === UPDATE API (Called from main.py) ===
+    # ======================================================================
+    def update_status(self, parameter_name, new_value, new_color=None):
+        """
+        Called by main.py upon receiving UART data.
+        """
+        if parameter_name in self.value_controls:
+            control = self.value_controls[parameter_name]
+            control.value = str(new_value)
+            
+            if new_color:
+                control.color = new_color
+            
+            # Refresh only this element
+            if control.page:
+                control.update()
+
+    # ======================================================================
+    # === UI HELPER METHODS ===
+    # ======================================================================
     def _create_header(self, text):
         return Container(
             content=Text(text, color=Colors.BLUE_GREY_200, weight="bold", size=14),
             padding=padding.only(top=10, bottom=5)
         )
 
-    def _create_status_row(self, label_text, start_value, color="white"):
+    def _create_status_row(self, label_text, start_value, color="white", key=None):
         value_display = Text(
             value=start_value,
             color=color,
@@ -102,7 +134,10 @@ class StatusView(flet.Container):
             size=16,
             text_align=flet.TextAlign.CENTER
         )
-        self.value_controls[label_text] = value_display
+        
+        # If key is not provided, use label as key
+        dict_key = key if key is not None else label_text
+        self.value_controls[dict_key] = value_display
 
         value_box = Container(
             content=value_display,
@@ -110,7 +145,7 @@ class StatusView(flet.Container):
             border=border.all(1, Colors.BLUE_GREY_700),
             border_radius=6,
             padding=padding.symmetric(horizontal=5, vertical=5),
-            width=130, # Zwiększyłem lekko szerokość, żeby napisy się mieściły
+            width=130, 
             alignment=alignment.center
         )
 
@@ -127,15 +162,3 @@ class StatusView(flet.Container):
             padding=padding.symmetric(vertical=3),
             border=border.only(bottom=border.BorderSide(1, "#444444"))
         )
-
-    def update_status(self, parameter_name, new_value, new_color=None):
-        if parameter_name in self.value_controls:
-            control = self.value_controls[parameter_name]
-            
-            control.value = str(new_value)
-            
-            if new_color:
-                control.color = new_color
-            
-            if control.page:
-                control.update()

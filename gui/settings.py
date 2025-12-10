@@ -1,52 +1,62 @@
 import flet
-from flet import Column, Row, Container, ElevatedButton, Slider, Text, Image, alignment, ScrollMode, MainAxisAlignment, Colors
+import flet as ft # Alias for convenience
+from flet import Column, Row, Container, ElevatedButton, Slider, Text, Image, alignment, ScrollMode, MainAxisAlignment, Colors, AlertDialog, ProgressRing, IconButton, Icons
 import json
-import os
-# Zmiana: Nie importujemy już UARTCommunicator, bo dostaniemy go z zewnątrz
-# from gui.communication import UARTCommunicator 
+import time
+import threading
 
 class SettingsView(flet.Container):
     """
-    Widok Ustawień (Settings) - WERSJA POPRAWIONA (FIX COM PORT).
+    Settings View - WITH STALLGUARD TUNING SUPPORT (New Debug Data Format)
+    AND SGGRIP TUNING
     """
     
     VIEW_MAPPING = {
-        "render1.png": "ROBOT GŁÓWNY",
-        "render2.png": "CHWYTAK OBR.",
-        "render3.png": "CHWYTAK PION."
+        "render1.png": "MAIN ROBOT",
+        "render2.png": "ROTARY GRIPPER",
+        "render3.png": "VERTICAL GRIPPER"
     }
 
-    # --- ZMIANA TUTAJ: Dodajemy argument uart_communicator ---
     def __init__(self, uart_communicator):
         super().__init__()
         self.padding = 10
         self.alignment = alignment.center
-        
-        # --- ZMIANA TUTAJ: Przypisujemy instancję z main.py ---
         self.comm = uart_communicator
-        # USUNIĘTO: self.comm.connect() - bo połączenie już jest aktywne!
         
-        # --- ZMIENNE STANU ---
+        # --- STATE VARIABLES ---
         self.selected_motor_index = 1 
         self.active_slider_set_id = 1 
         self.active_view_name = "render1.png" 
         self.current_gripper_values = []      
-        
-        self.motor_names = ["SILNIK J1","SILNIK J2","SILNIK J3","SILNIK J4","SILNIK J5","SILNIK J6"]
+        self.motor_names = ["MOTOR J1","MOTOR J2","MOTOR J3","MOTOR J4","MOTOR J5","MOTOR J6"]
         self.config_file_path = "motor_settings.json"
+        self.homing_event = threading.Event() # Flag for synchronization
 
-        # --- KONFIGURACJA SUWAKÓW ROBOTA ---
+        # Tuning variables for Robot Motors
+        self.tuning_dialog = None
+        self.tuning_slider = None
+        
+        # --- NEW VARIABLES FOR DEBUG DATA DISPLAY (ROBOT) ---
+        self.sg_value_text = Text("-", size=30, weight="bold", color=Colors.CYAN_400)
+        self.vel_value_text = Text("-", size=16, weight="bold", color=Colors.YELLOW_400)
+        self.mode_value_text = Text("-", size=16, weight="bold", color=Colors.WHITE)
+        
+        # --- NEW VARIABLES FOR SGGRIP TUNING (VERTICAL GRIPPER) ---
+        self.egrip_tuning_dialog = None
+        self.egrip_sg_result_text = Text("-", size=40, weight="bold", color=Colors.CYAN_300)
+
+        # --- ROBOT SLIDER CONFIGURATION ---
         self.slider_set_definitions = {
             1: [ ("A1", 200, 10000), ("V1", 500, 20000), ("AMAX", 1000, 30000), ("VMAX", 20000, 400000), ("D1", 500, 4000) ],
             2: [ ("IHOLD", 0, 31), ("IRUN", 0, 31), ("IHOLDDELAY", 0, 15) ],
             3: [ ("VMAX - HOMING", 5000, 500000), ("AMAX - HOMING", 1000, 8000), ("OFFSET[mm]", -50, 50) ],
-            4: [ ("Czułość", -31, 31), ("STALL - IHOLD", 0, 31) ]
+            4: [ ("Sensitivity (STALL_SENS)", -64, 63), ("Cutoff Speed", 0, 100000) ]
         }
 
         self.motor_settings_data = {} 
         self._load_settings() 
         
-        # Zmienne wewnętrzne UI
+        # UI init
         self.sliders_column_container = Column(controls=[], spacing=10, expand=True, scroll=ScrollMode.ADAPTIVE)
         self.sliders_labels = []        
         self.slider_controls = []       
@@ -54,266 +64,437 @@ class SettingsView(flet.Container):
 
         self.content = self._create_main_view()
 
-    # --- Konfiguracja Chwytaków ---
-    def _get_gripper_config(self, image_name):
-        if image_name == "render2.png":
-            return {
-                "title": "CHWYTAK OBROTOWY",
-                "image": "Gripper1.png",
-                "sliders": [
-                    ("Siła podciśnienia", 0, 100, 50),
-                    ("Czas załączenia pompy", 0, 30, 10)
-                ]
-            }
-        elif image_name == "render3.png":
-            return {
-                "title": "CHWYTAK PIONOWY",
-                "image": "Gripper2.png",
-                "sliders": [
-                    ("Offset Z [mm]", 0, 300, 0),
-                    ("Prędkość zacisku", 10, 200, 50),
-                    ("Zacisk siła", 0, 100, 80)
-                ]
-            }
-        return None
+    def on_homing_complete_signal(self):
+        """Method called from main.py when HOMING_COMPLETE_OK is received"""
+        print("Settings: Homing confirmation received!")
+        self.homing_event.set() # Unblock waiting thread
 
-    # --- Obsługa Danych ---
-    def _get_default_settings(self):
-        return {
-            1: { 1: [1500, 2500, 10000, 100000, 1400], 2: [11, 11, 6], 3: [300000, 5000, 0], 4: [0, 11] },
-            2: { 1: [1500, 2500, 20000, 200000, 1400], 2: [12, 12, 6], 3: [200000, 10000, 0], 4: [0, 12] },
-            3: { 1: [1500, 2500, 20000, 200000, 1400], 2: [9, 9, 6], 3: [200000, 10000, 0], 4: [0, 9] },
-            4: { 1: [1500, 2500, 10000, 100000, 1400], 2: [9, 9, 6], 3: [300000, 5000, 0], 4: [0, 9] },
-            5: { 1: [1500, 2500, 10000, 100000, 1400], 2: [9, 9, 6], 3: [200000, 10000, 0], 4: [0, 9] },
-            6: { 1: [1500, 2500, 20000, 200000, 1400], 2: [5, 5, 6], 3: [200000, 10000, 0], 4: [0, 5] }
-        }
+    # --- ROBUST PARSING METHOD ---
+    def parse_debug_line(self, data_line: str):
+        """
+        Parses line like: "J1_DBG: SG=150 | V=40000 | Mode=SPREAD(OK)"
+        and updates UI in tuning window (SAFELY).
+        """
+        # 1. Basic check: does dialog exist and is it open?
+        if not self.tuning_dialog or not self.tuning_dialog.open:
+            return
 
-    def _load_settings(self):
+        # 2. Second check: are controls attached to page?
+        if not self.sg_value_text.page:
+            return
+
+        clean_line = data_line.strip().replace("'", "").replace('"', "")
+        
+        # Check if line concerns selected motor
+        expected_tag = f"J{self.selected_motor_index}_DBG"
+        
+        if expected_tag not in clean_line:
+            return
+
         try:
-            with open(self.config_file_path, "r") as f:
-                loaded_data = json.load(f)
-                self.motor_settings_data = {
-                    int(m): {int(s): v for s, v in sett.items()} for m, sett in loaded_data.items()
-                }
-            print(f"Wczytano: {self.config_file_path}")
-        except:
-            print("Tworzenie domyślnych ustawień.")
-            self.motor_settings_data = self._get_default_settings()
-            self._save_settings()
+            if ":" in clean_line:
+                content = clean_line.split(":", 1)[1].strip()
+            else:
+                return
 
-    def _save_settings(self):
-        try:
-            with open(self.config_file_path, "w") as f:
-                json.dump(self.motor_settings_data, f, indent=4)
+            parts = content.split("|")
+            
+            for part in parts:
+                part = part.strip()
+                
+                # --- UPDATE SG ---
+                if "SG=" in part:
+                    val = part.split("=")[1].strip()
+                    if self.sg_value_text.page:
+                        self.sg_value_text.value = val
+                        self.sg_value_text.update()
+                    
+                # --- UPDATE SPEED (V) ---
+                elif "V=" in part:
+                    val = part.split("=")[1].strip()
+                    if self.vel_value_text.page:
+                        self.vel_value_text.value = f"{val} st/s"
+                        self.vel_value_text.update()
+                    
+                # --- UPDATE MODE ---
+                elif "Mode=" in part:
+                    mode_str = part.split("=")[1].strip()
+                    if self.mode_value_text.page:
+                        self.mode_value_text.value = mode_str
+                        
+                        if "BAD" in mode_str or "STEALTH" in mode_str:
+                            self.mode_value_text.color = Colors.RED_ACCENT
+                        else:
+                            self.mode_value_text.color = Colors.GREEN_ACCENT
+                        self.mode_value_text.update()
+                    
         except Exception as e:
-            print(f"Błąd zapisu JSON: {e}")
+            print(f"Error in parse_debug_line: {e}")
 
-    def did_mount(self):
-        if self.page: self.page.update()
-            
-    def reset_view(self):
-        self.content = self._create_main_view()
-        if self.page: self.page.update()
-            
-    def on_image_click(self, e, image_path: str):
-        self.content = self._create_detail_view(image_path)
-        if self.page: self.update()
-    
-    def _create_clickable_panel(self, image_name: str, map_key: str):
-        panel_style = {
-            "bgcolor": "#2D2D2D", "border_radius": 10,
-            "border": flet.border.all(2, "#555555"),
-            "clip_behavior": flet.ClipBehavior.ANTI_ALIAS, "expand": True
-        }
-        return flet.GestureDetector(
-            on_tap=lambda e: self.on_image_click(e, image_name),
-            content=Container(
-                content=Image(src=image_name, fit=flet.ImageFit.COVER, expand=True),
-                **panel_style
-            ),
+
+    # --- STALLGUARD TUNING LOGIC (ROBOT) ---
+
+    def _start_tuning_procedure(self, e):
+        """
+        CHANGE: Direct opening of tuning window (without forcing homing).
+        """
+        self._show_tuning_interface()
+
+    # This method (homing) is not used in this flow anymore, but kept 
+    # in code in case it's needed elsewhere.
+    def _run_homing_sequence(self):
+        pass 
+
+    def _show_tuning_interface(self):
+        """Actual tuning window for ROBOT JOINTS"""
+        
+        # 1. Get current sensitivity value
+        current_sens = 0
+        try:
+            current_sens = self.motor_settings_data[self.selected_motor_index][4][0]
+        except: pass
+
+        # 2. Initialize texts
+        self.slider_val_text = ft.Text(f"{int(current_sens)}", size=20, weight="bold")
+        self.stall_status_text = ft.Text("STATUS: OK", size=16, weight="bold", color="green", text_align=ft.TextAlign.CENTER)
+        
+        # Reset display values
+        self.sg_value_text.value = "-"
+        self.vel_value_text.value = "-"
+        self.mode_value_text.value = "-"
+
+        # Status container (background)
+        self.stall_status_container = ft.Container(
+            content=self.stall_status_text,
+            alignment=ft.alignment.center,
+            padding=10,
+            bgcolor="#1f3a1f",
+            border=ft.border.all(1, "#2f5a2f"),
+            border_radius=10,
             expand=True
         )
-    
-    def _create_main_view(self):
-        self.active_view_name = "MAIN"
-        panel1 = self._create_clickable_panel("render1.png", "render1.png")
-        panel2 = self._create_clickable_panel("render2.png", "render2.png")
-        panel3 = self._create_clickable_panel("render3.png", "render3.png")
-        prawa_kolumna = Column(controls=[panel2, panel3], spacing=10, expand=True)
-        return Row(
-            controls=[Container(content=panel1, expand=3), Container(content=prawa_kolumna, expand=1)],
-            spacing=10, expand=True
+
+        # Slider
+        self.tuning_slider = ft.Slider(
+            min=-64, max=63, value=current_sens, label="Sens: {value}", 
+            on_change=self._on_tuning_slider_change
         )
-    
-    def _create_detail_view(self, image_name: str):
-        self.active_view_name = image_name 
-        
-        podramka_style = {
-            "bgcolor": "#2D2D2D", "border_radius": 10,
-            "border": flet.border.all(1, "#555555"),
-            "padding": 10, "alignment": alignment.center 
-        }
-        podramka_obrazkowa_style = podramka_style.copy()
-        podramka_obrazkowa_style.pop("padding", None)
-        podramka_obrazkowa_style.pop("alignment", None)
-        podramka_obrazkowa_style["clip_behavior"] = flet.ClipBehavior.ANTI_ALIAS
 
-        value_display_box_style = {
-            "width": 60, "height": 30, "bgcolor": Colors.BLUE_GREY_800, 
-            "border_radius": 5, "border": flet.border.all(1, Colors.BLUE_GREY_600), 
-            "alignment": alignment.center 
-        }
+        # Dialog construction
+        self.tuning_dialog = ft.AlertDialog(
+            title=ft.Text(f"StallGuard Tuning - Axis J{self.selected_motor_index}"),
+            content=ft.Container(
+                width=500, height=550,
+                content=ft.Column([
+                    # --- STALL STATUS SECTION ---
+                    ft.Text("Collision Status:", size=14, color="#AAAAAA"),
+                    ft.Row([
+                        self.stall_status_container,
+                        ft.IconButton(icon=ft.Icons.DELETE_SWEEP, icon_color="orange", tooltip="Reset Error", on_click=self._reset_stall_status)
+                    ]),
+                    
+                    ft.Divider(color="#444"),
 
-        # ======================================================================
-        # WIDOK 1: ROBOT GŁÓWNY (render1.png)
-        # ======================================================================
-        if image_name == "render1.png":
-            btn_ctrls = []
-            for idx, name in enumerate(self.motor_names, start=1):
-                btn = ElevatedButton(
-                    text=name, expand=True,
-                    style=flet.ButtonStyle(bgcolor=Colors.BLUE_GREY_700, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=8)),
-                    on_click=lambda e, i=idx: self._on_motor_select(i)
-                )
-                btn_ctrls.append(btn)
-            
-            przycisk_panel = Container(
-                content=Column(controls=btn_ctrls, spacing=10, expand=True),
-                **podramka_style, expand=1
-            )
-            
-            top_btns = []
-            names = ["Ustawienia rampy", "Ustawienia prądu", "Ustawienia bazowania", "Ustawienia kolizji"]
-            for i, name in enumerate(names, start=1):
-                btn = ElevatedButton(
-                    text=name, height=45, expand=True,
-                    style=flet.ButtonStyle(bgcolor=Colors.BLUE_GREY_600, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=8)),
-                    on_click=lambda e, i=i: self._on_slider_set_select(i)
-                )
-                top_btns.append(btn)
+                    # --- NEW DIAGNOSTIC DATA SECTION (SG, V, MODE) ---
+                    ft.Container(
+                        padding=10,
+                        bgcolor="#222", border_radius=10,
+                        content=ft.Column([
+                            ft.Text("Live Diagnostics:", size=14, weight="bold", color="#888"),
+                            
+                            # Row 1: SG RESULT (Large)
+                            ft.Row([
+                                ft.Text("SG Result:", size=16), 
+                                self.sg_value_text
+                            ], alignment=MainAxisAlignment.SPACE_BETWEEN),
 
-            restore_btn = ElevatedButton(
-                text="DEFAULT", height=45, width=80, expand=False,
-                style=flet.ButtonStyle(bgcolor=Colors.RED_700, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=8)),
-                on_click=self._restore_default_settings
-            )
-            top_btns.append(restore_btn)
+                            # Row 2: Speed
+                            ft.Row([
+                                ft.Text("Speed (V):", size=14), 
+                                self.vel_value_text
+                            ], alignment=MainAxisAlignment.SPACE_BETWEEN),
 
-            top_panel = Container(content=Row(controls=top_btns, spacing=10, expand=True), **podramka_style)
-            
-            self.sliders_column_container = Column(controls=[], spacing=10, expand=True, scroll=ScrollMode.ADAPTIVE)
-            
-            suwak_panel_style = podramka_style.copy()
-            suwak_panel_style["alignment"] = alignment.top_center
-
-            suwak_panel = Container(
-                content=Column(controls=[top_panel, self.sliders_column_container], spacing=10, expand=True),
-                **suwak_panel_style,
-                expand=7
-            )
-            
-            self.selected_motor_index = 1
-            self.active_slider_set_id = 1
-            self._build_slider_ui(
-                self.slider_set_definitions.get(1, []),
-                self.motor_settings_data.get(1, {}).get(1, [])
-            )
-            
-            self.motor_display = Text("Silnik: J1", color="white", size=18, weight="bold")
-            save_button = ElevatedButton(
-                text="Zapisz", height=40, expand=True,
-                style=flet.ButtonStyle(bgcolor=Colors.GREEN_700, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=8)),
-                on_click=self._on_save_button_click
-            )
-            
-            obrazek_panel = Column(
-                controls=[
-                    Container(content=self.motor_display, **podramka_style, height=50),
-                    Container(content=Image(src="stepper60.png", fit=flet.ImageFit.CONTAIN, expand=True), **podramka_obrazkowa_style, expand=1),
-                    Row(controls=[save_button])
-                ],
-                spacing=10, expand=2
-            )
-            
-            return Row(controls=[przycisk_panel, suwak_panel, obrazek_panel], spacing=10, expand=True)
-
-        # ======================================================================
-        # WIDOK 2 i 3: CHWYTAKI
-        # ======================================================================
-        else:
-            config = self._get_gripper_config(image_name)
-            if not config: return Text("Błąd konfiguracji")
-
-            self.current_gripper_values = [item[3] for item in config["sliders"]]
-            sliders_list = []
-            
-            for index, (label, min_val, max_val, start_val) in enumerate(config["sliders"]):
-                lbl = Text(label, color="white", size=14, weight="bold", width=120) 
-                val_txt = Text(str(int(start_val)), color="white", size=14, weight="bold")
-                val_box = Container(content=val_txt, **value_display_box_style)
-
-                def on_change_local(e, v_txt=val_txt, idx=index):
-                    val = int(e.control.value)
-                    v_txt.value = str(val)
-                    v_txt.update()
-                    self.current_gripper_values[idx] = val 
-
-                sld = Slider(
-                    min=min_val, max=max_val, value=start_val, 
-                    label="{value}", active_color=Colors.BLUE_ACCENT_400, 
-                    expand=True, on_change=on_change_local
-                )
-
-                row_container = Container(
-                    content=Row(
-                        controls=[lbl, sld, val_box],
-                        alignment=MainAxisAlignment.SPACE_BETWEEN, spacing=10
+                            # Row 3: Driver Mode
+                            ft.Row([
+                                ft.Text("Mode:", size=14), 
+                                self.mode_value_text
+                            ], alignment=MainAxisAlignment.SPACE_BETWEEN),
+                        ], spacing=5)
                     ),
-                    padding=flet.padding.only(bottom=5)
-                )
-                sliders_list.append(row_container)
 
-            # --- PRZYCISKI ---
-            save_btn_gripper = ElevatedButton(
-                text="Zapisz", height=40, width=120, 
-                style=flet.ButtonStyle(bgcolor=Colors.GREEN_700, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=8)),
-                on_click=self._on_save_button_click
-            )
+                    ft.Divider(color="#444"),
 
-            default_btn_gripper = ElevatedButton(
-                text="DEFAULT", height=40, width=120,
-                style=flet.ButtonStyle(bgcolor=Colors.RED_700, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=8)),
-                on_click=self._restore_default_settings
-            )
+                    # --- SLIDER SECTION ---
+                    ft.Row([ft.Text("Sensitivity (STALL_SENS):", size=14), self.slider_val_text], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                    self.tuning_slider,
+                    
+                    ft.Container(height=10),
+
+                    # --- MOTION TEST SECTION ---
+                    ft.Text("Motion Test (Fwd/Bwd):", size=14),
+                    ft.ElevatedButton(
+                        "Test (-30° / +30°)", 
+                        icon=ft.Icons.PLAY_ARROW,
+                        on_click=self._run_test_motion,
+                        bgcolor=ft.Colors.BLUE_700, 
+                        color="white",
+                        height=50,
+                        width=400 
+                    )
+                ])
+            ),
+            actions=[
+                ft.ElevatedButton("Finish & Save", on_click=lambda e: self.page.close(self.tuning_dialog), bgcolor=ft.Colors.GREEN_700, color="white")
+            ],
+            modal=True
+        )
+        
+        self.page.open(self.tuning_dialog)
+        self.page.update()
+
+    # --- SGGRIP TUNING LOGIC (Vertical Gripper) ---
+
+    def _open_egrip_tuning(self, e):
+        """Opens the custom tuning window for Vertical Gripper"""
+        if len(self.current_gripper_values) < 3:
+            print("Error: Config not loaded correctly")
+            return
+
+        # Grip Force/Sensitivity is usually the 3rd slider (index 2) in the config
+        # Definition: ("Grip Force", -63, 63, 0)
+        current_sens = self.current_gripper_values[2]
+
+        self.egrip_sg_result_text.value = "-"
+        
+        # Display current sensitivity value
+        sens_label = Text(str(int(current_sens)), size=20, weight="bold")
+
+        def on_egrip_slider_change(e):
+            val = int(e.control.value)
+            sens_label.value = str(val)
+            sens_label.update()
             
-            buttons_row = Row(
-                controls=[default_btn_gripper, save_btn_gripper],
-                alignment=MainAxisAlignment.END, 
-                spacing=10
+            # Update internal state
+            self.current_gripper_values[2] = val
+            
+            # Send LIVE update command: OT,SGrip,Offset,Speed,Sensitivity
+            # We must send all 3 values
+            v_str = ",".join(map(str, self.current_gripper_values))
+            cmd = f"OT,SGrip,{v_str}\r\n"
+            if self.comm:
+                self.comm.send_message(cmd)
+
+        slider = Slider(
+            min=-64, max=63, value=current_sens, 
+            label="{value}", 
+            active_color=Colors.ORANGE_400,
+            on_change=on_egrip_slider_change
+        )
+
+        # Control Buttons
+        btn_style = flet.ButtonStyle(shape=flet.RoundedRectangleBorder(radius=8), padding=15)
+        
+        ctrl_buttons = Row([
+            ElevatedButton("OPEN", icon=Icons.FOLDER_OPEN, bgcolor=Colors.BLUE_700, color="white", style=btn_style, 
+                           on_click=lambda _: self._send_egrip_cmd("EGRIP_OPEN")),
+            ElevatedButton("STOP", icon=Icons.STOP_CIRCLE, bgcolor=Colors.RED_700, color="white", style=btn_style,
+                           on_click=lambda _: self._send_egrip_cmd("EGRIP_STOP")),
+            ElevatedButton("CLOSE", icon=Icons.FOLDER, bgcolor=Colors.BLUE_700, color="white", style=btn_style,
+                           on_click=lambda _: self._send_egrip_cmd("EGRIP_CLOSE")),
+        ], alignment=MainAxisAlignment.CENTER, spacing=20)
+
+        self.egrip_tuning_dialog = AlertDialog(
+            title=Text("SGGRIP Tuning (Vertical Gripper)"),
+            content=Container(
+                width=450, height=400,
+                content=Column([
+                    # Section 1: Result Display
+                    Container(
+                        padding=20, bgcolor="#222", border_radius=10,
+                        alignment=alignment.center,
+                        content=Column([
+                            Text("SG RESULT", size=14, color="#888"),
+                            self.egrip_sg_result_text
+                        ], horizontal_alignment=ft.CrossAxisAlignment.CENTER)
+                    ),
+                    
+                    ft.Divider(),
+                    
+                    # Section 2: Sensitivity Slider
+                    Row([Text("Sensitivity:", size=16), sens_label], alignment=MainAxisAlignment.SPACE_BETWEEN),
+                    slider,
+
+                    ft.Divider(),
+
+                    # Section 3: Controls
+                    Text("Manual Control:", size=14, color="#888"),
+                    ctrl_buttons
+
+                ], spacing=15)
+            ),
+            actions=[
+                ft.TextButton("Close", on_click=lambda e: self.page.close(self.egrip_tuning_dialog))
+            ]
+        )
+        self.page.open(self.egrip_tuning_dialog)
+        self.page.update()
+
+    def _send_egrip_cmd(self, command_str):
+        print(f"Sending SGGRIP Command: {command_str}")
+        if self.comm:
+            self.comm.send_message(f"{command_str}\r\n")
+
+    def _reset_stall_status(self, e):
+        """Resets status to green"""
+        if hasattr(self, 'stall_status_text'):
+            self.stall_status_text.value = "STATUS: OK"
+            self.stall_status_text.color = "green"
+            self.stall_status_text.update()
+            
+            if hasattr(self, 'stall_status_container'):
+                self.stall_status_container.bgcolor = "#1f3a1f"
+                self.stall_status_container.border = flet.border.all(1, "#2f5a2f")
+                self.stall_status_container.update()
+
+    def _on_tuning_slider_change(self, e):
+        val = int(e.control.value)
+        try:
+            self.motor_settings_data[self.selected_motor_index][4][0] = val
+        except: pass
+        
+        if hasattr(self, 'slider_val_text'):
+            self.slider_val_text.value = str(val)
+            self.slider_val_text.update()
+
+        # Send command
+        ihold_stall = 0
+        try: ihold_stall = self.motor_settings_data[self.selected_motor_index][4][1]
+        except: pass
+
+        cmd = f"OT,stall,J{self.selected_motor_index},{val},{ihold_stall}\r\n"
+        if self.comm: self.comm.send_message(cmd)
+
+    def _run_test_motion(self, e):
+        def motion():
+            motor = self.selected_motor_index
+            print(f"Motion test motor J{motor}")
+            self._reset_stall_status(None)
+            
+            if self.comm: self.comm.send_message(f"J{motor}_-30\r\n")
+            time.sleep(1.5) 
+            
+            if self.comm: self.comm.send_message(f"J{motor}_30\r\n")
+            time.sleep(1.5)
+            
+            if self.comm: self.comm.send_message(f"J{motor}_0\r\n")
+
+        threading.Thread(target=motion, daemon=True).start()
+
+    # --- ROBUST RECEIVE METHOD ---
+    def handle_stall_alert(self, data_string):
+        """Main method receiving data"""
+        if not data_string: return
+
+        # Remove quotes and whitespace
+        clean_str = data_string.strip().replace("'", "").replace('"', "")
+        
+        # --- 1. HANDLE ROBOT MOTOR DEBUG ---
+        if "_DBG" in clean_str:
+            self.parse_debug_line(clean_str)
+            return
+
+        # --- 2. HANDLE SGGRIP TUNING RESULT ---
+        # Format: "EGRIPSGRESULT_%d"
+        if "EGRIPSGRESULT_" in clean_str:
+            try:
+                # Extract value after the underscore
+                val_str = clean_str.split("_")[1].strip()
+                # Update text if dialog is open and attached
+                if (self.egrip_tuning_dialog and 
+                    self.egrip_tuning_dialog.open and 
+                    self.egrip_sg_result_text.page):
+                    
+                    self.egrip_sg_result_text.value = val_str
+                    self.egrip_sg_result_text.update()
+            except Exception as e:
+                print(f"Error parsing SGGRIP result: {e}")
+            return
+        
+        # ---------------------------------------
+
+        # Old Collision ALERT handling (STALL_J1)
+        if "STALL" in clean_str and not "_DBG" in clean_str:
+             if hasattr(self, 'stall_status_text') and self.stall_status_text:
+                # Check if it concerns current motor
+                target_motor_tag = f"J{self.selected_motor_index}" # e.g. J1
+                
+                if target_motor_tag in clean_str:
+                    try:
+                        self.stall_status_text.value = "⚠️ COLLISION (STALL)! ⚠️"
+                        self.stall_status_text.color = "white"
+                        self.stall_status_text.update()
+                        
+                        if hasattr(self, 'stall_status_container'):
+                            self.stall_status_container.bgcolor = flet.Colors.RED_900
+                            self.stall_status_container.border = flet.border.all(2, flet.Colors.RED_400)
+                            self.stall_status_container.update()
+                    except: pass
+
+    def upload_configuration(self, page_from_main=None):
+        if not self.comm or not self.comm.is_open(): return
+        target_page = self.page if self.page else page_from_main
+        loading_dialog = None
+        if target_page:
+            loading_content = Container(
+                width=300, height=150, bgcolor="#252525", border_radius=10, padding=20,
+                content=Column([
+                    Text("Sending Data...", size=16, weight="bold"),
+                    flet.ProgressBar(width=260, color=Colors.BLUE_400),
+                    Text("Don't turn off the power", size=12, color="red")
+                ], alignment=MainAxisAlignment.CENTER)
             )
+            loading_dialog = AlertDialog(content=loading_content, modal=True, bgcolor=Colors.TRANSPARENT)
+            target_page.open(loading_dialog)
+            target_page.update()
 
-            # --- UKŁAD ---
-            lewy_panel = Container(
-                content=Image(src=config["image"], fit=flet.ImageFit.CONTAIN),
-                **podramka_obrazkowa_style,
-                width=450, expand=False 
-            )
+        try:
+            time.sleep(0.5)
+            for motor_id in range(1, 7):
+                settings = self.motor_settings_data.get(motor_id, {})
+                
+                vals = settings.get(1, [1000, 5000, 5000, 50000, 5000])
+                cmd = f"OT,ramp,J{motor_id},{vals[0]},{vals[1]},{vals[2]},{vals[3]},{vals[4]}\r\n"
+                self.comm.send_message(cmd)
+                time.sleep(0.15)
 
-            prawy_panel = Container(
-                content=Column(
-                    controls=[
-                        Text(config["title"], size=20, weight="bold", color="white"),
-                        Column(controls=sliders_list, scroll=ScrollMode.ADAPTIVE, expand=True),
-                        buttons_row 
-                    ],
-                    spacing=15, expand=True
-                ),
-                **podramka_style, expand=True
-            )
+                vals = settings.get(2, [5, 10, 10])
+                cmd = f"OT,current,J{motor_id},{vals[0]},{vals[1]},{vals[2]}\r\n"
+                self.comm.send_message(cmd)
+                time.sleep(0.15)
 
-            return Row(controls=[lewy_panel, prawy_panel], spacing=10, expand=True)
+                vals = settings.get(3, [50000, 2000, 0])
+                cmd = f"OT,homing,J{motor_id},{vals[0]},{vals[1]},{vals[2]}\r\n"
+                self.comm.send_message(cmd)
+                time.sleep(0.15)
 
-  # --- Logika Suwaków ---
+                vals = settings.get(4, [0, 5])
+                cmd = f"OT,stall,J{motor_id},{vals[0]},{vals[1]}\r\n"
+                self.comm.send_message(cmd)
+                time.sleep(0.15)
+
+            time.sleep(1.5) 
+            for _ in range(3):
+                if self.comm: self.comm.send_message("CONFIG_DONE\r\n")
+                time.sleep(0.5)
+            
+        except Exception as e:
+            print(f"Error: {e}")
+        finally:
+            if target_page and loading_dialog:
+                target_page.close(loading_dialog)
+                target_page.open(flet.SnackBar(content=Text("Configuration Complete"), bgcolor=Colors.GREEN_700))
+                target_page.update()
+
     def _build_slider_ui(self, structure_configs: list, value_configs: list):
         self.sliders_column_container.controls.clear()
         self.sliders_labels = []
@@ -326,45 +507,42 @@ class SettingsView(flet.Container):
             "alignment": alignment.center 
         }
 
-        # --- NOWA FUNKCJA AKTUALIZACJI (LIVE) ---
-        # Uruchamiana przy każdym ruchu suwaka
-        def on_live_change(e, txt_ctrl, idx):
-            val = int(e.control.value)
-            
-            # 1. Aktualizacja wizualna (Text)
-            txt_ctrl.value = str(val)
-            txt_ctrl.update()
-            
-            # 2. Aktualizacja danych w pamięci (Słownik) OD RAZU
-            try:
-                self.motor_settings_data[self.selected_motor_index][self.active_slider_set_id][idx] = val
-            except Exception as ex:
-                print(f"Błąd aktualizacji danych suwaka: {ex}")
+        def on_live_change(e, txt_ctrl, idx, is_float):
+            val = float(e.control.value)
+            if is_float:
+                txt_ctrl.value = f"{val:.1f}"
+                save_val = round(val, 1)
+            else:
+                txt_ctrl.value = str(int(val))
+                save_val = int(val)
 
-        # --- FUNKCJA ZAPISU DO PLIKU ---
-        # Uruchamiana tylko po puszczeniu suwaka
+            txt_ctrl.update()
+            try:
+                self.motor_settings_data[self.selected_motor_index][self.active_slider_set_id][idx] = save_val
+            except Exception as ex:
+                print(f"Slider update error: {ex}")
+
         def on_release(e):
             self._save_settings()
 
         for i, (s_label, s_min, s_max) in enumerate(structure_configs):
-            # Zabezpieczenie przed brakiem wartości w configu
             s_val = value_configs[i] if i < len(value_configs) else 0
             s_val = max(s_min, min(s_max, s_val))
             
+            is_offset = "OFFSET" in s_label
+            num_divisions = int((s_max - s_min) * 10) if is_offset else int(s_max - s_min)
+            display_str = f"{s_val:.1f}" if is_offset else str(int(s_val))
+
             lbl = Text(s_label, color="white", size=14, weight="bold")
-            val_txt = Text(str(int(s_val)), color="white", size=14, weight="bold")
+            val_txt = Text(display_str, color="white", size=14, weight="bold")
             val_box = Container(content=val_txt, **value_display_box_style)
             
             sld = Slider(
                 min=s_min, max=s_max, value=s_val, label="{value}", 
-                active_color=Colors.BLUE_ACCENT_400, expand=True
+                divisions=num_divisions, active_color=Colors.BLUE_ACCENT_400, expand=True
             )
-
-            # --- TUTAJ ZMIANA ---
-            # on_change: Aktualizuje tekst ORAZ dane w zmiennej (gotowe do wysłania przyciskiem Zapisz)
-            sld.on_change = lambda e, t=val_txt, idx=i: on_live_change(e, t, idx)
             
-            # on_change_end: Zapisuje ustawienia do pliku JSON (żeby nie mulić podczas przesuwania)
+            sld.on_change = lambda e, t=val_txt, idx=i, fl=is_offset: on_live_change(e, t, idx, fl)
             sld.on_change_end = lambda e: on_release(e)
             
             self.sliders_labels.append(lbl)
@@ -375,6 +553,18 @@ class SettingsView(flet.Container):
                 content=Row(controls=[lbl, sld, val_box], spacing=10),
                 padding=flet.padding.only(top=5,bottom=5)
             ))
+
+        if self.active_slider_set_id == 4:
+            tuning_btn = ElevatedButton(
+                "StallGuard Tuning",
+                icon=flet.Icons.TUNE,
+                style=flet.ButtonStyle(bgcolor=Colors.ORANGE_700, color="white", shape=flet.RoundedRectangleBorder(radius=8)),
+                on_click=self._start_tuning_procedure
+            )
+            self.sliders_column_container.controls.append(
+                Container(content=tuning_btn, alignment=alignment.center, padding=flet.padding.only(top=15))
+            )
+    
     def _on_slider_set_select(self, idx):
         self.active_slider_set_id = idx
         self._build_slider_ui(
@@ -385,24 +575,31 @@ class SettingsView(flet.Container):
             
     def _on_motor_select(self, idx):
         self.selected_motor_index = idx
-        self.motor_display.value = f"Silnik: J{idx}"
+        self.motor_display.value = f"Motor: J{idx}"
+        
         struct = self.slider_set_definitions.get(self.active_slider_set_id, [])
         vals = self.motor_settings_data.get(idx, {}).get(self.active_slider_set_id, [])
 
         for i in range(min(len(self.slider_controls), len(struct))):
-            _, s_min, s_max = struct[i]
+            s_label, s_min, s_max = struct[i]
             v = vals[i] if i < len(vals) else 0
             v = max(s_min, min(s_max, v))
+            
+            self.slider_controls[i].min = s_min
+            self.slider_controls[i].max = s_max
             self.slider_controls[i].value = v
-            self.slider_value_displays[i].value = str(int(v))
+            
+            if "OFFSET" in s_label:
+                self.slider_value_displays[i].value = f"{v:.1f}"
+            else:
+                self.slider_value_displays[i].value = str(int(v))
+            
             self.slider_controls[i].update()
             self.slider_value_displays[i].update()
 
         if self.page: self.motor_display.update()
-            
-    # --- Logika Przycisków ---
+
     def _restore_default_settings(self, e):
-        print(f"Przywracanie ustawień dla: {self.active_view_name}")
         if self.active_view_name == "render1.png":
             self.motor_settings_data = self._get_default_settings()
             self._save_settings()
@@ -411,7 +608,8 @@ class SettingsView(flet.Container):
             self.content = self._create_detail_view(self.active_view_name)
             if self.page: self.update()
 
-    def _on_save_button_click(self, e):
+    def _on_send_and_save_click(self, e):
+        self._save_settings()
         final_command = ""
         if self.active_view_name == "render1.png":
             option_map = { 1: "ramp", 2: "current", 3: "homing", 4: "stall" }
@@ -431,17 +629,122 @@ class SettingsView(flet.Container):
 
         if final_command:
             final_command += "\n\r"
-            print(f"Wysyłanie ({self.active_view_name}): {final_command.strip()}")
+            print(f"Sending: {final_command.strip()}")
             if self.comm and self.comm.is_open():
-                if not self.comm.send_message(final_command):
-                    print("BŁĄD: Nie udało się wysłać polecenia.")
+                self.comm.send_message(final_command)
             else:
-                print("BŁĄD: Brak połączenia z portem.")
+                print("No connection")
+
+    def _get_default_settings(self):
+        return {
+            1: { 1: [1500, 2500, 10000, 100000, 1400], 2: [11, 11, 6], 3: [300000, 5000, 0], 4: [0, 11] },
+            2: { 1: [1500, 2500, 20000, 200000, 1400], 2: [12, 12, 6], 3: [200000, 10000, 0], 4: [0, 12] },
+            3: { 1: [1500, 2500, 20000, 200000, 1400], 2: [9, 9, 6], 3: [200000, 10000, 0], 4: [0, 9] },
+            4: { 1: [1500, 2500, 10000, 100000, 1400], 2: [9, 9, 6], 3: [300000, 5000, 0], 4: [0, 9] },
+            5: { 1: [1500, 2500, 10000, 100000, 1400], 2: [9, 9, 6], 3: [200000, 10000, 0], 4: [0, 9] },
+            6: { 1: [1500, 2500, 20000, 200000, 1400], 2: [5, 5, 6], 3: [200000, 10000, 0], 4: [0, 5] }
+        }
+
+    def _load_settings(self):
+        try:
+            with open(self.config_file_path, "r") as f:
+                loaded_data = json.load(f)
+                self.motor_settings_data = {int(m): {int(s): v for s, v in sett.items()} for m, sett in loaded_data.items()}
+        except:
+            self.motor_settings_data = self._get_default_settings()
+            self._save_settings()
+
+    def _save_settings(self):
+        try:
+            with open(self.config_file_path, "w") as f:
+                json.dump(self.motor_settings_data, f, indent=4)
+        except Exception as e:
+            print(f"JSON Save Error: {e}")
+
+    def reset_view(self):
+        self.content = self._create_main_view()
+        if self.page: self.page.update()
+
+    def on_image_click(self, e, image_path: str):
+        self.content = self._create_detail_view(image_path)
+        if self.page: self.update()
+
+    def _create_clickable_panel(self, image_name: str, map_key: str):
+        panel_style = { "bgcolor": "#2D2D2D", "border_radius": 10, "border": flet.border.all(2, "#555555"), "clip_behavior": flet.ClipBehavior.ANTI_ALIAS, "expand": True }
+        return flet.GestureDetector(
+            on_tap=lambda e: self.on_image_click(e, image_name),
+            content=Container(content=Image(src=image_name, fit=flet.ImageFit.COVER, expand=True), **panel_style),
+            expand=True
+        )
+
+    def _create_main_view(self):
+        self.active_view_name = "MAIN"
+        panel1 = self._create_clickable_panel("render1.png", "render1.png")
+        panel2 = self._create_clickable_panel("render2.png", "render2.png")
+        panel3 = self._create_clickable_panel("render3.png", "render3.png")
+        return Row(controls=[Container(content=panel1, expand=3), Container(content=Column([panel2, panel3], spacing=10, expand=True), expand=1)], spacing=10, expand=True)
+
+    def _get_gripper_config(self, image_name):
+        if image_name == "render2.png": return { "title": "ROTARY GRIPPER", "image": "Gripper1.png", "sliders": [("Vacuum Power", 0, 100, 50), ("Pump Time", 0, 30, 10)] }
+        elif image_name == "render3.png": return { "title": "VERTICAL GRIPPER", "image": "Gripper2.png", "sliders": [("Offset Z [mm]", 0, 300, 0), ("Grip Speed", 200, 100000, 5000), ("Grip Force", -63, 63, 0)] }
+        return None
+
+    def _create_detail_view(self, image_name: str):
+        self.active_view_name = image_name 
+        podramka_style = { "bgcolor": "#2D2D2D", "border_radius": 10, "border": flet.border.all(1, "#555555"), "padding": 10, "alignment": alignment.center }
+        podramka_obrazkowa_style = podramka_style.copy()
+        podramka_obrazkowa_style.pop("padding", None); podramka_obrazkowa_style.pop("alignment", None); podramka_obrazkowa_style["clip_behavior"] = flet.ClipBehavior.ANTI_ALIAS
+        
+        if image_name == "render1.png":
+            btn_ctrls = [ElevatedButton(text=name, expand=True, style=flet.ButtonStyle(bgcolor=Colors.BLUE_GREY_700, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=8)), on_click=lambda e, i=idx: self._on_motor_select(i)) for idx, name in enumerate(self.motor_names, start=1)]
+            top_btns = [ElevatedButton(text=name, height=45, expand=True, style=flet.ButtonStyle(bgcolor=Colors.BLUE_GREY_600, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=8)), on_click=lambda e, i=i: self._on_slider_set_select(i)) for i, name in enumerate(["Ramp Settings", "Current Settings", "Homing Settings", "Collision Settings"], start=1)]
+            top_btns.append(ElevatedButton(text="DEFAULT", height=45, width=80, style=flet.ButtonStyle(bgcolor=Colors.RED_700, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=8)), on_click=self._restore_default_settings))
+            
+            self.sliders_column_container = Column(controls=[], spacing=10, expand=True, scroll=ScrollMode.ADAPTIVE)
+            self._build_slider_ui(self.slider_set_definitions.get(1, []), self.motor_settings_data.get(1, {}).get(1, []))
+            
+            self.motor_display = Text("Motor: J1", color="white", size=18, weight="bold")
+            send_save_button = ElevatedButton(text="Send & Save", height=40, expand=True, style=flet.ButtonStyle(bgcolor=Colors.GREEN_700, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=8)), on_click=self._on_send_and_save_click)
+            
+            return Row(controls=[
+                Container(content=Column(controls=btn_ctrls, spacing=10, expand=True), **podramka_style, expand=1),
+                Container(content=Column(controls=[Container(content=Row(controls=top_btns, spacing=10, expand=True), **podramka_style), self.sliders_column_container], spacing=10, expand=True), **{**podramka_style, "alignment": alignment.top_center}, expand=7),
+                Column(controls=[Container(content=self.motor_display, **podramka_style, height=50), Container(content=Image(src="stepper60.png", fit=flet.ImageFit.CONTAIN, expand=True), **podramka_obrazkowa_style, expand=1), Row(controls=[send_save_button])], spacing=10, expand=2)
+            ], spacing=10, expand=True)
+
         else:
-            print("BŁĄD: Puste polecenie.")
+            config = self._get_gripper_config(image_name)
+            if not config: return Text("Config Error")
+            self.current_gripper_values = [item[3] for item in config["sliders"]]
+            sliders_list = []
+            for index, (label, min_val, max_val, start_val) in enumerate(config["sliders"]):
+                val_txt = Text(str(int(start_val)), color="white", size=14, weight="bold")
+                def on_change_local(e, v_txt=val_txt, idx=index):
+                    v_txt.value = str(int(e.control.value)); v_txt.update(); self.current_gripper_values[idx] = int(e.control.value)
+                sliders_list.append(Container(content=Row(controls=[Text(label, color="white", size=14, weight="bold", width=120), Slider(min=min_val, max=max_val, value=start_val, label="{value}", active_color=Colors.BLUE_ACCENT_400, expand=True, on_change=on_change_local), Container(content=val_txt, **{"width": 60, "height": 30, "bgcolor": Colors.BLUE_GREY_800, "border_radius": 5, "border": flet.border.all(1, Colors.BLUE_GREY_600), "alignment": alignment.center})], alignment=MainAxisAlignment.SPACE_BETWEEN, spacing=10), padding=flet.padding.only(bottom=5)))
+            
+            # --- ACTION BUTTONS FOR GRIPPER VIEW ---
+            action_buttons_row = [
+                ElevatedButton("DEFAULT", height=40, width=100, style=flet.ButtonStyle(bgcolor=Colors.RED_700, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=8)), on_click=self._restore_default_settings),
+                ElevatedButton("Send & Save", height=40, width=150, style=flet.ButtonStyle(bgcolor=Colors.GREEN_700, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=8)), on_click=self._on_send_and_save_click)
+            ]
 
+            # --- ADD TUNING BUTTON ONLY FOR VERTICAL GRIPPER (render3.png) ---
+            if image_name == "render3.png":
+                tuning_btn = ElevatedButton(
+                    "TUNING", 
+                    height=40, width=120, 
+                    icon=Icons.TUNE,
+                    style=flet.ButtonStyle(bgcolor=Colors.ORANGE_700, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=8)),
+                    on_click=self._open_egrip_tuning
+                )
+                action_buttons_row.insert(1, tuning_btn) # Insert between Default and Save
 
-    def _update_text_only(self, e, txt):
-        # Tylko aktualizacja wizualna tekstu (bez zapisu, bez logiki)
-        txt.value = str(int(e.control.value))
-        txt.update()
+            return Row(controls=[
+                Container(content=Image(src=config["image"], fit=flet.ImageFit.CONTAIN), **podramka_obrazkowa_style, width=450, expand=False),
+                Container(content=Column(controls=[
+                    Text(config["title"], size=20, weight="bold", color="white"), 
+                    Column(controls=sliders_list, scroll=ScrollMode.ADAPTIVE, expand=True), 
+                    Row(controls=action_buttons_row, alignment=MainAxisAlignment.END, spacing=10)
+                ], spacing=15, expand=True), **podramka_style, expand=True)
+            ], spacing=10, expand=True)
