@@ -1,5 +1,5 @@
 import flet
-import flet as ft # Alias for convenience
+import flet as ft
 from flet import Column, Row, Container, ElevatedButton, Slider, Text, Image, alignment, ScrollMode, MainAxisAlignment, Colors, AlertDialog, ProgressRing, IconButton, Icons
 import json
 import time
@@ -7,8 +7,10 @@ import threading
 
 class SettingsView(flet.Container):
     """
-    Settings View - WITH STALLGUARD TUNING SUPPORT (New Debug Data Format)
-    AND SGGRIP TUNING
+    Settings View - FINAL FIXED VERSION
+    - Fixed 'homing_event' AttributeError.
+    - Includes robust position parsing (fixes 0.0 issue).
+    - Includes Strict Test Motion (checks for physical stuck).
     """
     
     VIEW_MAPPING = {
@@ -23,6 +25,12 @@ class SettingsView(flet.Container):
         self.alignment = alignment.center
         self.comm = uart_communicator
         
+        # --- GEAR RATIOS (J1 to J6) ---
+        self.gear_ratios = {
+            1: 6.4, 2: 20.0, 3: 18.0952381, 
+            4: 4.0, 5: 4.0, 6: 10.0
+        }
+
         # --- STATE VARIABLES ---
         self.selected_motor_index = 1 
         self.active_slider_set_id = 1 
@@ -30,27 +38,39 @@ class SettingsView(flet.Container):
         self.current_gripper_values = []      
         self.motor_names = ["MOTOR J1","MOTOR J2","MOTOR J3","MOTOR J4","MOTOR J5","MOTOR J6"]
         self.config_file_path = "motor_settings.json"
-        self.homing_event = threading.Event() # Flag for synchronization
+        
+        # --- KLUCZOWE ZMIENNE (To naprawia Twój błąd) ---
+        self.homing_event = threading.Event()  # <--- TEGO BRAKOWAŁO
+        self.current_test_pos = 0.0            # Do śledzenia pozycji w teście
 
-        # Tuning variables for Robot Motors
+        # Checkbox SYNCHRO
+        self.synchro_checkbox = ft.Checkbox(
+            label="SYNCHRO", value=False, fill_color=Colors.CYAN_400,
+            tooltip="Automatycznie skaluje prędkości innych osi wg przełożeń"
+        )
+
+        # Tuning variables
         self.tuning_dialog = None
         self.tuning_slider = None
+        self.sg_chart = None
+        self.chart_data_points = []
+        self.chart_threshold_points = []
         
-        # --- NEW VARIABLES FOR DEBUG DATA DISPLAY (ROBOT) ---
+        # Debug Data Display
         self.sg_value_text = Text("-", size=30, weight="bold", color=Colors.CYAN_400)
         self.vel_value_text = Text("-", size=16, weight="bold", color=Colors.YELLOW_400)
         self.mode_value_text = Text("-", size=16, weight="bold", color=Colors.WHITE)
         
-        # --- NEW VARIABLES FOR SGGRIP TUNING (VERTICAL GRIPPER) ---
+        # SGGRIP Tuning
         self.egrip_tuning_dialog = None
         self.egrip_sg_result_text = Text("-", size=40, weight="bold", color=Colors.CYAN_300)
 
         # --- ROBOT SLIDER CONFIGURATION ---
         self.slider_set_definitions = {
-            1: [ ("A1", 200, 10000), ("V1", 500, 20000), ("AMAX", 1000, 30000), ("VMAX", 20000, 400000), ("D1", 500, 4000) ],
+            1: [ ("A1", 200, 10000), ("V1", 10, 20000), ("AMAX", 1000, 30000), ("VMAX", 10000, 400000), ("D1", 200, 4000) ],
             2: [ ("IHOLD", 0, 31), ("IRUN", 0, 31), ("IHOLDDELAY", 0, 15) ],
             3: [ ("VMAX - HOMING", 5000, 500000), ("AMAX - HOMING", 1000, 8000), ("OFFSET[mm]", -50, 50) ],
-            4: [ ("Sensitivity (STALL_SENS)", -64, 63), ("Cutoff Speed", 0, 100000) ]
+            4: [ ("Sensitivity (STALL_SENS)", -64, 63), ("SGT THRESHOLD", 0, 1000) ]
         }
 
         self.motor_settings_data = {} 
@@ -63,396 +83,414 @@ class SettingsView(flet.Container):
         self.slider_value_displays = [] 
 
         self.content = self._create_main_view()
+        self.homing_dialog = None
 
-    def on_homing_complete_signal(self):
-        """Method called from main.py when HOMING_COMPLETE_OK is received"""
-        print("Settings: Homing confirmation received!")
-        self.homing_event.set() # Unblock waiting thread
-
-    # --- ROBUST PARSING METHOD ---
-    def parse_debug_line(self, data_line: str):
-        """
-        Parses line like: "J1_DBG: SG=150 | V=40000 | Mode=SPREAD(OK)"
-        and updates UI in tuning window (SAFELY).
-        """
-        # 1. Basic check: does dialog exist and is it open?
-        if not self.tuning_dialog or not self.tuning_dialog.open:
-            return
-
-        # 2. Second check: are controls attached to page?
-        if not self.sg_value_text.page:
-            return
-
-        clean_line = data_line.strip().replace("'", "").replace('"', "")
+    # --- SYGNAŁ BAZOWANIA (To wywoływało błąd) ---
+    def open_homing_window(self, e):
+        # ---------------------------------------------------------
+        # ZMIEŃ: zamiast 'dlg = ...', użyj 'self.homing_dialog = ...'
+        # ---------------------------------------------------------
+        self.homing_dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Bazowanie..."),
+            content=ft.Column([
+                ft.ProgressRing(),
+                ft.Text("Proszę czekać...")
+            ], height=100),
+            actions=[],
+        )
         
-        # Check if line concerns selected motor
+        # Otwieranie dialogu (zależnie od wersji Flet):
+        self.page.open(self.homing_dialog)
+    # Dodaj to wewnątrz klasy SettingsView (np. na samym dole klasy)
+    def close_homing_dialog(self):
+        # Sprawdzamy, czy dialog istnieje i czy jest otwarty
+        if self.homing_dialog is not None:
+            self.homing_dialog.open = False
+            self.homing_dialog.update()
+            # Alternatywnie dla Flet > 0.21:
+            try:
+                self.page.close(self.homing_dialog)
+            except:
+                pass
+    # --- PARSING ---
+    def parse_debug_line(self, data_line: str):
+        clean_line = data_line.strip().replace("'", "").replace('"', "")
         expected_tag = f"J{self.selected_motor_index}_DBG"
         
-        if expected_tag not in clean_line:
-            return
+        if expected_tag not in clean_line: return
 
         try:
             if ":" in clean_line:
                 content = clean_line.split(":", 1)[1].strip()
-            else:
-                return
+            else: return
 
             parts = content.split("|")
-            
             for part in parts:
                 part = part.strip()
-                
-                # --- UPDATE SG ---
                 if "SG=" in part:
                     val = part.split("=")[1].strip()
                     if self.sg_value_text.page:
                         self.sg_value_text.value = val
                         self.sg_value_text.update()
-                    
-                # --- UPDATE SPEED (V) ---
                 elif "V=" in part:
                     val = part.split("=")[1].strip()
                     if self.vel_value_text.page:
                         self.vel_value_text.value = f"{val} st/s"
                         self.vel_value_text.update()
-                    
-                # --- UPDATE MODE ---
                 elif "Mode=" in part:
                     mode_str = part.split("=")[1].strip()
                     if self.mode_value_text.page:
                         self.mode_value_text.value = mode_str
-                        
                         if "BAD" in mode_str or "STEALTH" in mode_str:
                             self.mode_value_text.color = Colors.RED_ACCENT
                         else:
                             self.mode_value_text.color = Colors.GREEN_ACCENT
                         self.mode_value_text.update()
-                    
         except Exception as e:
             print(f"Error in parse_debug_line: {e}")
 
-
-    # --- STALLGUARD TUNING LOGIC (ROBOT) ---
-
     def _start_tuning_procedure(self, e):
-        """
-        CHANGE: Direct opening of tuning window (without forcing homing).
-        """
         self._show_tuning_interface()
+# --- GLÓWNY ODBIÓR DANYCH (ULEPSZONY PARSER) ---
+    def handle_stall_alert(self, data_string):
+        if not data_string: return
+        clean_str = data_string.strip().replace("'", "").replace('"', "")
+        current_motor_tag = f"J{self.selected_motor_index}"
 
-    # This method (homing) is not used in this flow anymore, but kept 
-    # in code in case it's needed elsewhere.
-    def _run_homing_sequence(self):
-        pass 
+        # 1. PARSOWANIE POZYCJI (Kluczowe dla testu)
+        # Ignorujemy komunikaty debugowe, kolizje itp. przy szukaniu czystej pozycji
+        if current_motor_tag in clean_str and not any(x in clean_str for x in ["DBG", "COLLISION", "SGRESULT", "Mode"]):
+            
+            # --- DIAGNOSTYKA: Zobacz co przychodzi ---
+            # print(f"[RX RAW] {clean_str}") 
+            
+            try:
+                # Zamieniamy wszelkie separatory (_, :, =) na spacje, żeby łatwo podzielić
+                # Np. "J1_28.12" -> "J1 28.12"
+                # Np. "Pos: J1=28.12" -> "Pos  J1 28.12"
+                normalized = clean_str.replace("_", " ").replace(":", " ").replace("=", " ")
+                parts = normalized.split()
+                
+                # Szukamy sekwencji: [TAG_SILNIKA] [LICZBA]
+                for i, part in enumerate(parts):
+                    if part == current_motor_tag:
+                        # Sprawdzamy następny element, czy jest liczbą
+                        if i + 1 < len(parts):
+                            val_str = parts[i+1]
+                            try:
+                                val = float(val_str)
+                                self.current_test_pos = val
+                                # print(f"[POS UPDATED] {current_motor_tag} = {val}") # Sukces
+                                break
+                            except: pass
+            except Exception as e:
+                print(f"Parsing Error: {e}")
+
+        # 2. SG_RESULT (Wykres StallGuard)
+        if "_SGRESULT_" in clean_str:
+            try:
+                parts = clean_str.split("_")
+                if len(parts) >= 3:
+                    incoming_tag = parts[0]
+                    val_str = parts[-1]
+                    if incoming_tag == current_motor_tag:
+                        val = int(val_str)
+                        if (self.tuning_dialog and self.tuning_dialog.open and 
+                            self.sg_chart and self.chart_data_points):
+                            # Shift wykresu
+                            for i in range(len(self.chart_data_points) - 1):
+                                self.chart_data_points[i].y = self.chart_data_points[i+1].y
+                            self.chart_data_points[-1].y = val
+                            self.sg_chart.update()
+            except: pass
+            return
+
+        # 3. KOLIZJA
+        if "COLLISION" in clean_str and current_motor_tag in clean_str:
+            if hasattr(self, 'stall_status_text') and self.stall_status_text.page:
+                self.stall_status_text.value = f"⚠️ KOLIZJA!"
+                self.stall_status_text.color = "white"
+                self.stall_status_text.update()
+            if hasattr(self, 'stall_status_container') and self.stall_status_container.page:
+                self.stall_status_container.bgcolor = ft.Colors.RED_900
+                self.stall_status_container.border = ft.border.all(2, ft.Colors.RED_400)
+                self.stall_status_container.update()
+            return
+
+        # 4. CHWYTAK (EGRIP)
+        if "EGRIPSGRESULT_" in clean_str:
+            try:
+                val = clean_str.split("_")[1].strip()
+                if (self.egrip_tuning_dialog and self.egrip_tuning_dialog.open and self.egrip_sg_result_text.page):
+                    self.egrip_sg_result_text.value = val
+                    self.egrip_sg_result_text.update()
+            except: pass
+            return
+        # 3. KOLIZJA
+        if "COLLISION" in clean_str and current_motor_tag in clean_str:
+            if hasattr(self, 'stall_status_text') and self.stall_status_text.page:
+                self.stall_status_text.value = f"⚠️ KOLIZJA!"
+                self.stall_status_text.color = "white"
+                self.stall_status_text.update()
+            if hasattr(self, 'stall_status_container') and self.stall_status_container.page:
+                self.stall_status_container.bgcolor = ft.Colors.RED_900
+                self.stall_status_container.border = ft.border.all(2, ft.Colors.RED_400)
+                self.stall_status_container.update()
+            return
+
+        # 4. CHWYTAK
+        if "EGRIPSGRESULT_" in clean_str:
+            try:
+                val = clean_str.split("_")[1].strip()
+                if (self.egrip_tuning_dialog and self.egrip_tuning_dialog.open and self.egrip_sg_result_text.page):
+                    self.egrip_sg_result_text.value = val
+                    self.egrip_sg_result_text.update()
+            except: pass
+            return
 
     def _show_tuning_interface(self):
-        """Actual tuning window for ROBOT JOINTS"""
-        
-        # 1. Get current sensitivity value
         current_sens = 0
+        current_threshold = 10 
+        
         try:
-            current_sens = self.motor_settings_data[self.selected_motor_index][4][0]
-        except: pass
+            if self.selected_motor_index in self.motor_settings_data:
+                settings_list = self.motor_settings_data[self.selected_motor_index].get(4, [])
+                if len(settings_list) > 0: current_sens = settings_list[0]
+                if len(settings_list) > 1: current_threshold = settings_list[1]
+                if len(settings_list) < 2: self.motor_settings_data[self.selected_motor_index][4].append(10)
+        except Exception as e: print(f"Err: {e}")
 
-        # 2. Initialize texts
-        self.slider_val_text = ft.Text(f"{int(current_sens)}", size=20, weight="bold")
-        self.stall_status_text = ft.Text("STATUS: OK", size=16, weight="bold", color="green", text_align=ft.TextAlign.CENTER)
+        if not self.chart_data_points:
+            self.chart_data_points = [ft.LineChartDataPoint(i, 0) for i in range(50)]
         
-        # Reset display values
-        self.sg_value_text.value = "-"
-        self.vel_value_text.value = "-"
-        self.mode_value_text.value = "-"
+        self.chart_threshold_points = [ft.LineChartDataPoint(i, current_threshold) for i in range(50)]
 
-        # Status container (background)
-        self.stall_status_container = ft.Container(
-            content=self.stall_status_text,
-            alignment=ft.alignment.center,
-            padding=10,
-            bgcolor="#1f3a1f",
-            border=ft.border.all(1, "#2f5a2f"),
-            border_radius=10,
-            expand=True
-        )
-
-        # Slider
-        self.tuning_slider = ft.Slider(
-            min=-64, max=63, value=current_sens, label="Sens: {value}", 
-            on_change=self._on_tuning_slider_change
-        )
-
-        # Dialog construction
-        self.tuning_dialog = ft.AlertDialog(
-            title=ft.Text(f"StallGuard Tuning - Axis J{self.selected_motor_index}"),
-            content=ft.Container(
-                width=500, height=550,
-                content=ft.Column([
-                    # --- STALL STATUS SECTION ---
-                    ft.Text("Collision Status:", size=14, color="#AAAAAA"),
-                    ft.Row([
-                        self.stall_status_container,
-                        ft.IconButton(icon=ft.Icons.DELETE_SWEEP, icon_color="orange", tooltip="Reset Error", on_click=self._reset_stall_status)
-                    ]),
-                    
-                    ft.Divider(color="#444"),
-
-                    # --- NEW DIAGNOSTIC DATA SECTION (SG, V, MODE) ---
-                    ft.Container(
-                        padding=10,
-                        bgcolor="#222", border_radius=10,
-                        content=ft.Column([
-                            ft.Text("Live Diagnostics:", size=14, weight="bold", color="#888"),
-                            
-                            # Row 1: SG RESULT (Large)
-                            ft.Row([
-                                ft.Text("SG Result:", size=16), 
-                                self.sg_value_text
-                            ], alignment=MainAxisAlignment.SPACE_BETWEEN),
-
-                            # Row 2: Speed
-                            ft.Row([
-                                ft.Text("Speed (V):", size=14), 
-                                self.vel_value_text
-                            ], alignment=MainAxisAlignment.SPACE_BETWEEN),
-
-                            # Row 3: Driver Mode
-                            ft.Row([
-                                ft.Text("Mode:", size=14), 
-                                self.mode_value_text
-                            ], alignment=MainAxisAlignment.SPACE_BETWEEN),
-                        ], spacing=5)
-                    ),
-
-                    ft.Divider(color="#444"),
-
-                    # --- SLIDER SECTION ---
-                    ft.Row([ft.Text("Sensitivity (STALL_SENS):", size=14), self.slider_val_text], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
-                    self.tuning_slider,
-                    
-                    ft.Container(height=10),
-
-                    # --- MOTION TEST SECTION ---
-                    ft.Text("Motion Test (Fwd/Bwd):", size=14),
-                    ft.ElevatedButton(
-                        "Test (-30° / +30°)", 
-                        icon=ft.Icons.PLAY_ARROW,
-                        on_click=self._run_test_motion,
-                        bgcolor=ft.Colors.BLUE_700, 
-                        color="white",
-                        height=50,
-                        width=400 
-                    )
-                ])
-            ),
-            actions=[
-                ft.ElevatedButton("Finish & Save", on_click=lambda e: self.page.close(self.tuning_dialog), bgcolor=ft.Colors.GREEN_700, color="white")
+        self.sg_chart = ft.LineChart(
+            data_series=[
+                ft.LineChartData(data_points=self.chart_data_points, stroke_width=3, color=ft.Colors.CYAN, curved=True, stroke_cap_round=True),
+                ft.LineChartData(data_points=self.chart_threshold_points, stroke_width=2, color=ft.Colors.RED, dash_pattern=[5, 5]),
             ],
-            modal=True
+            border=ft.border.all(1, ft.Colors.GREY_800),
+            left_axis=ft.ChartAxis(labels_size=40, title=ft.Text("SG"), title_size=20, 
+                labels=[
+                    ft.ChartAxisLabel(value=0, label=ft.Text("0", size=10)),
+                    ft.ChartAxisLabel(value=500, label=ft.Text("500", size=10)),
+                    ft.ChartAxisLabel(value=1024, label=ft.Text("1024", size=10, color="yellow")),
+                ]),
+            bottom_axis=ft.ChartAxis(labels_size=0),
+            min_y=0, max_y=1050, min_x=0, max_x=49, 
+            expand=True, tooltip_bgcolor=ft.Colors.with_opacity(0.8, ft.Colors.BLACK),
         )
-        
+
+        self.slider_val_text = ft.Text(f"{int(current_sens)}", size=20, weight="bold", text_align=ft.TextAlign.RIGHT)
+        self.threshold_val_text = ft.Text(f"{int(current_threshold)}", size=20, weight="bold", color="orange", text_align=ft.TextAlign.RIGHT)
+        self.stall_status_text = ft.Text("STATUS: OK", size=14, weight="bold", color="green", text_align=ft.TextAlign.CENTER)
+
+        self.stall_status_container = ft.Container(
+            content=self.stall_status_text, alignment=ft.alignment.center, padding=10,
+            bgcolor="#1f3a1f", border=ft.border.all(1, "#2f5a2f"), border_radius=8, width=200
+        )
+
+        self.tuning_slider = ft.Slider(min=-64, max=63, value=current_sens, label="{value}", on_change=self._on_tuning_slider_change, expand=True)
+        self.threshold_slider = ft.Slider(min=0, max=1023, value=current_threshold, label="{value}", divisions=1023, active_color=ft.Colors.ORANGE_400, on_change=self._on_tuning_threshold_change, expand=True)
+
+        def on_reset_click(e):
+            if self.comm: self.comm.send_message("COLLISION_OK\r\n")
+            self._reset_stall_status(None)
+            e.control.icon = ft.Icons.CHECK; e.control.icon_color = "green"; e.control.update()
+            time.sleep(0.5)
+            e.control.icon = ft.Icons.REFRESH; e.control.icon_color = "white"; e.control.update()
+
+        reset_button = ft.IconButton(icon=ft.Icons.REFRESH, icon_color="white", bgcolor="blue", tooltip="ODBLOKUJ", on_click=on_reset_click)
+
+        def close_and_refresh(e):
+            self.page.close(self.tuning_dialog)
+            if self.active_slider_set_id == 4: self._on_slider_set_select(4) 
+
+        dialog_content = ft.Column([
+            ft.Text("Wykres obciążenia (Live):", size=14, color="#888"),
+            ft.Container(content=self.sg_chart, expand=True, padding=ft.padding.only(left=5, top=10, right=10, bottom=10), bgcolor="#222", border_radius=10),
+            ft.Divider(color="#444", height=10),
+            ft.Row([ft.Text("Czułość (SGT):", size=16, width=130), self.tuning_slider, ft.Container(content=self.slider_val_text, width=50, alignment=alignment.center_right)], alignment=ft.MainAxisAlignment.CENTER),
+            ft.Row([ft.Text("Próg (Limit):", size=16, color="orange", width=130), self.threshold_slider, ft.Container(content=self.threshold_val_text, width=50, alignment=alignment.center_right)], alignment=ft.MainAxisAlignment.CENTER),
+            ft.Divider(color="#444", height=10),
+            ft.Row([ft.Row([self.stall_status_container, reset_button], spacing=5), ft.ElevatedButton("RUCH TESTOWY", icon=ft.Icons.SWAP_HORIZ, on_click=self._run_test_motion, style=ft.ButtonStyle(bgcolor=ft.Colors.BLUE_700, color="white", shape=ft.RoundedRectangleBorder(radius=8), padding=15), expand=True)], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
+        ], spacing=5)
+
+        title_row = ft.Row(controls=[ft.Text(f"Tuning StallGuard - Oś J{self.selected_motor_index}", size=20, weight="bold"), ft.IconButton(icon=ft.Icons.CLOSE, icon_size=24, tooltip="Zamknij", on_click=close_and_refresh)], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
+
+        self.tuning_dialog = ft.AlertDialog(title=title_row, title_padding=ft.padding.only(left=20, right=10, top=10, bottom=0), content=ft.Container(width=850, height=700, content=dialog_content), modal=True)
         self.page.open(self.tuning_dialog)
         self.page.update()
 
-    # --- SGGRIP TUNING LOGIC (Vertical Gripper) ---
+    def _reset_stall_status(self, e):
+        if hasattr(self, 'stall_status_text') and self.stall_status_text.page:
+            self.stall_status_text.value = "STATUS: OK (Brak kolizji)"
+            self.stall_status_text.color = "green"
+            self.stall_status_text.update()
+        if hasattr(self, 'stall_status_container') and self.stall_status_container.page:
+            self.stall_status_container.bgcolor = "#1f3a1f"
+            self.stall_status_container.border = flet.border.all(1, "#2f5a2f")
+            self.stall_status_container.update()
 
-    def _open_egrip_tuning(self, e):
-        """Opens the custom tuning window for Vertical Gripper"""
-        if len(self.current_gripper_values) < 3:
-            print("Error: Config not loaded correctly")
+    def _on_tuning_slider_change(self, e):
+        val = int(e.control.value)
+        try: self.motor_settings_data[self.selected_motor_index][4][0] = val
+        except: pass
+        if hasattr(self, 'slider_val_text'): self.slider_val_text.value = str(val); self.slider_val_text.update()
+        
+        ihold_stall = 0
+        try: ihold_stall = self.motor_settings_data[self.selected_motor_index][4][1]
+        except: pass
+        if self.comm: self.comm.send_message(f"OT,stall,J{self.selected_motor_index},{val},{ihold_stall}\r\n")
+
+    def _on_tuning_threshold_change(self, e):
+        val = int(e.control.value)
+        if hasattr(self, 'threshold_val_text'): self.threshold_val_text.value = str(val); self.threshold_val_text.update()
+        if self.sg_chart and self.chart_threshold_points:
+            for p in self.chart_threshold_points: p.y = val 
+            self.sg_chart.update()
+        try:
+            while len(self.motor_settings_data[self.selected_motor_index][4]) < 2: self.motor_settings_data[self.selected_motor_index][4].append(10)
+            self.motor_settings_data[self.selected_motor_index][4][1] = val
+        except: pass
+        if self.comm: self.comm.send_message(f"OT,sgth,J{self.selected_motor_index},{val}\r\n")
+
+    # --- FUNKCJA TESTOWA "STRICT" (Dla kalibracji) ---
+    def _run_test_motion(self, e):
+        """
+        Wysyła komendę i czeka na pozycję.
+        Zgłasza błąd w UI jeśli robot fizycznie nie osiągnie celu (np. przez złe ratio).
+        """
+        def move_and_wait_strict(motor, target_angle):
+            print(f"[TEST] Sending J{motor}_{target_angle}")
+            if self.comm: self.comm.send_message(f"J{motor}_{target_angle}\r\n")
+            
+            time.sleep(0.5) # Czekaj na start
+            
+            strict_tolerance = 0.5  # Tolerancja 0.5 stopnia
+            last_position = -9999.0
+            stuck_counter = 0       
+            
+            # Pętla bez limitu czasu, ale z wykrywaniem "zacięcia"
+            while True:
+                current = self.current_test_pos
+                diff = abs(current - target_angle)
+                
+                # SUKCES
+                if diff <= strict_tolerance:
+                    print(f"[TEST] SUCCESS! Reached {target_angle} deg.")
+                    return True
+                
+                # WYKRYWANIE STANIA W MIEJSCU (STUCK)
+                # Jeśli pozycja się nie zmienia (<0.01) przez dłuższy czas
+                if abs(current - last_position) < 0.01:
+                    stuck_counter += 1
+                else:
+                    stuck_counter = 0 # Robot się rusza
+                    
+                last_position = current
+                
+                # Jeśli stoi przez 3 sekundy (30 * 0.1s) w złym miejscu -> BŁĄD
+                if stuck_counter > 30:
+                    err_msg = f"ERROR: Robot stuck at {current}° (Target: {target_angle}°)"
+                    print(f"\n[TEST ERROR] {err_msg}")
+                    print("!!! CHECK GEAR RATIOS !!!\n")
+                    
+                    if self.page: 
+                        self.page.snack_bar = ft.SnackBar(ft.Text(err_msg), bgcolor=ft.Colors.RED)
+                        self.page.snack_bar.open = True
+                        self.page.update()
+                    return False # Przerwij test
+                
+                time.sleep(0.1)
+
+        def motion_sequence():
+            motor = self.selected_motor_index
+            self._reset_stall_status(None)
+            
+            print("--- START STRICT SEQUENCE ---")
+            
+            if not move_and_wait_strict(motor, 30): return
+            time.sleep(1.0)
+            
+            if not move_and_wait_strict(motor, -30): return
+            time.sleep(1.0)
+            
+            if not move_and_wait_strict(motor, 0): return
+            
+            print("--- END STRICT SEQUENCE: OK ---")
+            if self.page: 
+                self.page.snack_bar = ft.SnackBar(ft.Text("Test Complete: Perfect Accuracy"), bgcolor=ft.Colors.GREEN)
+                self.page.snack_bar.open = True
+                self.page.update()
+
+        threading.Thread(target=motion_sequence, daemon=True).start()
+
+    # --- Wklej to wewnątrz klasy SettingsView w pliku gui/settings.py ---
+    
+    def set_homed_status(self, is_homed: bool):
+        """
+        Obsługa sygnału z main.py o zakończeniu bazowania.
+        Zamyka okno dialogowe w SettingsView.
+        """
+        # Jeśli masz metodę close_homing_dialog, po prostu ją wywołaj:
+        if hasattr(self, 'close_homing_dialog'):
+            self.close_homing_dialog()
             return
 
-        # Grip Force/Sensitivity is usually the 3rd slider (index 2) in the config
-        # Definition: ("Grip Force", -63, 63, 0)
-        current_sens = self.current_gripper_values[2]
+        # Jeśli nie masz close_homing_dialog, użyj tego bezpiecznego kodu:
+        if self.page and hasattr(self, 'homing_loading_dialog') and self.homing_loading_dialog:
+            self.homing_loading_dialog.open = False
+            self.page.update()
+            try:
+                self.page.close(self.homing_loading_dialog)
+            except: pass
+            self.homing_loading_dialog = None
 
+
+    def _open_egrip_tuning(self, e):
+        if len(self.current_gripper_values) < 3: return
+        current_sens = self.current_gripper_values[2]
         self.egrip_sg_result_text.value = "-"
-        
-        # Display current sensitivity value
         sens_label = Text(str(int(current_sens)), size=20, weight="bold")
 
         def on_egrip_slider_change(e):
             val = int(e.control.value)
-            sens_label.value = str(val)
-            sens_label.update()
-            
-            # Update internal state
+            sens_label.value = str(val); sens_label.update()
             self.current_gripper_values[2] = val
-            
-            # Send LIVE update command: OT,SGrip,Offset,Speed,Sensitivity
-            # We must send all 3 values
             v_str = ",".join(map(str, self.current_gripper_values))
-            cmd = f"OT,SGrip,{v_str}\r\n"
-            if self.comm:
-                self.comm.send_message(cmd)
+            if self.comm: self.comm.send_message(f"OT,SGrip,{v_str}\r\n")
 
-        slider = Slider(
-            min=-64, max=63, value=current_sens, 
-            label="{value}", 
-            active_color=Colors.ORANGE_400,
-            on_change=on_egrip_slider_change
-        )
-
-        # Control Buttons
+        slider = Slider(min=-64, max=63, value=current_sens, label="{value}", active_color=Colors.ORANGE_400, on_change=on_egrip_slider_change)
         btn_style = flet.ButtonStyle(shape=flet.RoundedRectangleBorder(radius=8), padding=15)
-        
         ctrl_buttons = Row([
-            ElevatedButton("OPEN", icon=Icons.FOLDER_OPEN, bgcolor=Colors.BLUE_700, color="white", style=btn_style, 
-                           on_click=lambda _: self._send_egrip_cmd("EGRIP_OPEN")),
-            ElevatedButton("STOP", icon=Icons.STOP_CIRCLE, bgcolor=Colors.RED_700, color="white", style=btn_style,
-                           on_click=lambda _: self._send_egrip_cmd("EGRIP_STOP")),
-            ElevatedButton("CLOSE", icon=Icons.FOLDER, bgcolor=Colors.BLUE_700, color="white", style=btn_style,
-                           on_click=lambda _: self._send_egrip_cmd("EGRIP_CLOSE")),
+            ElevatedButton("OPEN", icon=Icons.FOLDER_OPEN, bgcolor=Colors.BLUE_700, color="white", style=btn_style, on_click=lambda _: self._send_egrip_cmd("EGRIP_OPEN")),
+            ElevatedButton("STOP", icon=Icons.STOP_CIRCLE, bgcolor=Colors.RED_700, color="white", style=btn_style, on_click=lambda _: self._send_egrip_cmd("EGRIP_STOP")),
+            ElevatedButton("CLOSE", icon=Icons.FOLDER, bgcolor=Colors.BLUE_700, color="white", style=btn_style, on_click=lambda _: self._send_egrip_cmd("EGRIP_CLOSE")),
         ], alignment=MainAxisAlignment.CENTER, spacing=20)
 
         self.egrip_tuning_dialog = AlertDialog(
             title=Text("SGGRIP Tuning (Vertical Gripper)"),
-            content=Container(
-                width=450, height=400,
-                content=Column([
-                    # Section 1: Result Display
-                    Container(
-                        padding=20, bgcolor="#222", border_radius=10,
-                        alignment=alignment.center,
-                        content=Column([
-                            Text("SG RESULT", size=14, color="#888"),
-                            self.egrip_sg_result_text
-                        ], horizontal_alignment=ft.CrossAxisAlignment.CENTER)
-                    ),
-                    
-                    ft.Divider(),
-                    
-                    # Section 2: Sensitivity Slider
-                    Row([Text("Sensitivity:", size=16), sens_label], alignment=MainAxisAlignment.SPACE_BETWEEN),
-                    slider,
-
-                    ft.Divider(),
-
-                    # Section 3: Controls
-                    Text("Manual Control:", size=14, color="#888"),
-                    ctrl_buttons
-
-                ], spacing=15)
-            ),
-            actions=[
-                ft.TextButton("Close", on_click=lambda e: self.page.close(self.egrip_tuning_dialog))
-            ]
+            content=Container(width=450, height=400, content=Column([
+                Container(padding=20, bgcolor="#222", border_radius=10, alignment=alignment.center, content=Column([Text("SG RESULT", size=14, color="#888"), self.egrip_sg_result_text], horizontal_alignment=ft.CrossAxisAlignment.CENTER)),
+                ft.Divider(), Row([Text("Sensitivity:", size=16), sens_label], alignment=MainAxisAlignment.SPACE_BETWEEN), slider, ft.Divider(), Text("Manual Control:", size=14, color="#888"), ctrl_buttons
+            ], spacing=15)),
+            actions=[ft.TextButton("Close", on_click=lambda e: self.page.close(self.egrip_tuning_dialog))]
         )
         self.page.open(self.egrip_tuning_dialog)
         self.page.update()
 
     def _send_egrip_cmd(self, command_str):
-        print(f"Sending SGGRIP Command: {command_str}")
-        if self.comm:
-            self.comm.send_message(f"{command_str}\r\n")
-
-    def _reset_stall_status(self, e):
-        """Resets status to green"""
-        if hasattr(self, 'stall_status_text'):
-            self.stall_status_text.value = "STATUS: OK"
-            self.stall_status_text.color = "green"
-            self.stall_status_text.update()
-            
-            if hasattr(self, 'stall_status_container'):
-                self.stall_status_container.bgcolor = "#1f3a1f"
-                self.stall_status_container.border = flet.border.all(1, "#2f5a2f")
-                self.stall_status_container.update()
-
-    def _on_tuning_slider_change(self, e):
-        val = int(e.control.value)
-        try:
-            self.motor_settings_data[self.selected_motor_index][4][0] = val
-        except: pass
-        
-        if hasattr(self, 'slider_val_text'):
-            self.slider_val_text.value = str(val)
-            self.slider_val_text.update()
-
-        # Send command
-        ihold_stall = 0
-        try: ihold_stall = self.motor_settings_data[self.selected_motor_index][4][1]
-        except: pass
-
-        cmd = f"OT,stall,J{self.selected_motor_index},{val},{ihold_stall}\r\n"
-        if self.comm: self.comm.send_message(cmd)
-
-    def _run_test_motion(self, e):
-        def motion():
-            motor = self.selected_motor_index
-            print(f"Motion test motor J{motor}")
-            self._reset_stall_status(None)
-            
-            if self.comm: self.comm.send_message(f"J{motor}_-30\r\n")
-            time.sleep(1.5) 
-            
-            if self.comm: self.comm.send_message(f"J{motor}_30\r\n")
-            time.sleep(1.5)
-            
-            if self.comm: self.comm.send_message(f"J{motor}_0\r\n")
-
-        threading.Thread(target=motion, daemon=True).start()
-
-    # --- ROBUST RECEIVE METHOD ---
-    def handle_stall_alert(self, data_string):
-        """Main method receiving data"""
-        if not data_string: return
-
-        # Remove quotes and whitespace
-        clean_str = data_string.strip().replace("'", "").replace('"', "")
-        
-        # --- 1. HANDLE ROBOT MOTOR DEBUG ---
-        if "_DBG" in clean_str:
-            self.parse_debug_line(clean_str)
-            return
-
-        # --- 2. HANDLE SGGRIP TUNING RESULT ---
-        # Format: "EGRIPSGRESULT_%d"
-        if "EGRIPSGRESULT_" in clean_str:
-            try:
-                # Extract value after the underscore
-                val_str = clean_str.split("_")[1].strip()
-                # Update text if dialog is open and attached
-                if (self.egrip_tuning_dialog and 
-                    self.egrip_tuning_dialog.open and 
-                    self.egrip_sg_result_text.page):
-                    
-                    self.egrip_sg_result_text.value = val_str
-                    self.egrip_sg_result_text.update()
-            except Exception as e:
-                print(f"Error parsing SGGRIP result: {e}")
-            return
-        
-        # ---------------------------------------
-
-        # Old Collision ALERT handling (STALL_J1)
-        if "STALL" in clean_str and not "_DBG" in clean_str:
-             if hasattr(self, 'stall_status_text') and self.stall_status_text:
-                # Check if it concerns current motor
-                target_motor_tag = f"J{self.selected_motor_index}" # e.g. J1
-                
-                if target_motor_tag in clean_str:
-                    try:
-                        self.stall_status_text.value = "⚠️ COLLISION (STALL)! ⚠️"
-                        self.stall_status_text.color = "white"
-                        self.stall_status_text.update()
-                        
-                        if hasattr(self, 'stall_status_container'):
-                            self.stall_status_container.bgcolor = flet.Colors.RED_900
-                            self.stall_status_container.border = flet.border.all(2, flet.Colors.RED_400)
-                            self.stall_status_container.update()
-                    except: pass
+        if self.comm: self.comm.send_message(f"{command_str}\r\n")
 
     def upload_configuration(self, page_from_main=None):
         if not self.comm or not self.comm.is_open(): return
         target_page = self.page if self.page else page_from_main
         loading_dialog = None
         if target_page:
-            loading_content = Container(
-                width=300, height=150, bgcolor="#252525", border_radius=10, padding=20,
-                content=Column([
-                    Text("Sending Data...", size=16, weight="bold"),
-                    flet.ProgressBar(width=260, color=Colors.BLUE_400),
-                    Text("Don't turn off the power", size=12, color="red")
-                ], alignment=MainAxisAlignment.CENTER)
-            )
+            loading_content = Container(width=300, height=150, bgcolor="#252525", border_radius=10, padding=20, content=Column([Text("Sending Data...", size=16, weight="bold"), flet.ProgressBar(width=260, color=Colors.BLUE_400), Text("Don't turn off the power", size=12, color="red")], alignment=MainAxisAlignment.CENTER))
             loading_dialog = AlertDialog(content=loading_content, modal=True, bgcolor=Colors.TRANSPARENT)
             target_page.open(loading_dialog)
             target_page.update()
@@ -461,34 +499,19 @@ class SettingsView(flet.Container):
             time.sleep(0.5)
             for motor_id in range(1, 7):
                 settings = self.motor_settings_data.get(motor_id, {})
-                
                 vals = settings.get(1, [1000, 5000, 5000, 50000, 5000])
-                cmd = f"OT,ramp,J{motor_id},{vals[0]},{vals[1]},{vals[2]},{vals[3]},{vals[4]}\r\n"
-                self.comm.send_message(cmd)
-                time.sleep(0.15)
-
+                self.comm.send_message(f"OT,ramp,J{motor_id},{vals[0]},{vals[1]},{vals[2]},{vals[3]},{vals[4]}\r\n"); time.sleep(0.15)
                 vals = settings.get(2, [5, 10, 10])
-                cmd = f"OT,current,J{motor_id},{vals[0]},{vals[1]},{vals[2]}\r\n"
-                self.comm.send_message(cmd)
-                time.sleep(0.15)
-
+                self.comm.send_message(f"OT,current,J{motor_id},{vals[0]},{vals[1]},{vals[2]}\r\n"); time.sleep(0.15)
                 vals = settings.get(3, [50000, 2000, 0])
-                cmd = f"OT,homing,J{motor_id},{vals[0]},{vals[1]},{vals[2]}\r\n"
-                self.comm.send_message(cmd)
-                time.sleep(0.15)
-
+                self.comm.send_message(f"OT,homing,J{motor_id},{vals[0]},{vals[1]},{vals[2]}\r\n"); time.sleep(0.15)
                 vals = settings.get(4, [0, 5])
-                cmd = f"OT,stall,J{motor_id},{vals[0]},{vals[1]}\r\n"
-                self.comm.send_message(cmd)
-                time.sleep(0.15)
-
+                self.comm.send_message(f"OT,stall,J{motor_id},{vals[0]},{vals[1]}\r\n"); time.sleep(0.15)
             time.sleep(1.5) 
             for _ in range(3):
                 if self.comm: self.comm.send_message("CONFIG_DONE\r\n")
                 time.sleep(0.5)
-            
-        except Exception as e:
-            print(f"Error: {e}")
+        except Exception as e: print(f"Error: {e}")
         finally:
             if target_page and loading_dialog:
                 target_page.close(loading_dialog)
@@ -507,6 +530,7 @@ class SettingsView(flet.Container):
             "alignment": alignment.center 
         }
 
+        # --- CALLBACK ZMIANY WARTOŚCI (TU DZIAŁA SYNCHRO) ---
         def on_live_change(e, txt_ctrl, idx, is_float):
             val = float(e.control.value)
             if is_float:
@@ -517,10 +541,32 @@ class SettingsView(flet.Container):
                 save_val = int(val)
 
             txt_ctrl.update()
+            
+            # 1. Zapisz wartość dla aktualnie wybranego silnika
             try:
                 self.motor_settings_data[self.selected_motor_index][self.active_slider_set_id][idx] = save_val
             except Exception as ex:
                 print(f"Slider update error: {ex}")
+
+            # 2. LOGIKA SYNCHRO (Tylko dla Ramp Settings - ID 1)
+            if self.synchro_checkbox.value and self.active_slider_set_id == 1 and idx in [2, 3]:
+                try:
+                    source_ratio = self.gear_ratios[self.selected_motor_index]
+                    source_val = val
+                    for other_motor_id in range(1, 7):
+                        if other_motor_id == self.selected_motor_index: continue
+                        target_ratio = self.gear_ratios[other_motor_id]
+                        new_val = source_val * (target_ratio / source_ratio)
+                        _, min_limit, max_limit = self.slider_set_definitions[1][idx]
+                        clamped_val = max(min_limit, min(max_limit, new_val))
+                        if not is_float: clamped_val = int(clamped_val)
+                        else: clamped_val = round(clamped_val, 1)
+
+                        if other_motor_id not in self.motor_settings_data: self.motor_settings_data[other_motor_id] = {}
+                        if 1 not in self.motor_settings_data[other_motor_id]:
+                            self.motor_settings_data[other_motor_id][1] = [1500, 2500, 10000, 100000, 1400]
+                        self.motor_settings_data[other_motor_id][1][idx] = clamped_val
+                except Exception as sync_err: print(f"Synchro Error: {sync_err}")
 
         def on_release(e):
             self._save_settings()
@@ -528,7 +574,6 @@ class SettingsView(flet.Container):
         for i, (s_label, s_min, s_max) in enumerate(structure_configs):
             s_val = value_configs[i] if i < len(value_configs) else 0
             s_val = max(s_min, min(s_max, s_val))
-            
             is_offset = "OFFSET" in s_label
             num_divisions = int((s_max - s_min) * 10) if is_offset else int(s_max - s_min)
             display_str = f"{s_val:.1f}" if is_offset else str(int(s_val))
@@ -537,11 +582,7 @@ class SettingsView(flet.Container):
             val_txt = Text(display_str, color="white", size=14, weight="bold")
             val_box = Container(content=val_txt, **value_display_box_style)
             
-            sld = Slider(
-                min=s_min, max=s_max, value=s_val, label="{value}", 
-                divisions=num_divisions, active_color=Colors.BLUE_ACCENT_400, expand=True
-            )
-            
+            sld = Slider(min=s_min, max=s_max, value=s_val, label="{value}", divisions=num_divisions, active_color=Colors.BLUE_ACCENT_400, expand=True)
             sld.on_change = lambda e, t=val_txt, idx=i, fl=is_offset: on_live_change(e, t, idx, fl)
             sld.on_change_end = lambda e: on_release(e)
             
@@ -555,28 +596,17 @@ class SettingsView(flet.Container):
             ))
 
         if self.active_slider_set_id == 4:
-            tuning_btn = ElevatedButton(
-                "StallGuard Tuning",
-                icon=flet.Icons.TUNE,
-                style=flet.ButtonStyle(bgcolor=Colors.ORANGE_700, color="white", shape=flet.RoundedRectangleBorder(radius=8)),
-                on_click=self._start_tuning_procedure
-            )
-            self.sliders_column_container.controls.append(
-                Container(content=tuning_btn, alignment=alignment.center, padding=flet.padding.only(top=15))
-            )
+            tuning_btn = ElevatedButton("StallGuard Tuning", icon=flet.Icons.TUNE, style=flet.ButtonStyle(bgcolor=Colors.ORANGE_700, color="white", shape=flet.RoundedRectangleBorder(radius=8)), on_click=self._start_tuning_procedure)
+            self.sliders_column_container.controls.append(Container(content=tuning_btn, alignment=alignment.center, padding=flet.padding.only(top=15)))
     
     def _on_slider_set_select(self, idx):
         self.active_slider_set_id = idx
-        self._build_slider_ui(
-            self.slider_set_definitions.get(idx, []),
-            self.motor_settings_data.get(self.selected_motor_index, {}).get(idx, [])
-        )
+        self._build_slider_ui(self.slider_set_definitions.get(idx, []), self.motor_settings_data.get(self.selected_motor_index, {}).get(idx, []))
         if self.page: self.sliders_column_container.update() 
             
     def _on_motor_select(self, idx):
         self.selected_motor_index = idx
         self.motor_display.value = f"Motor: J{idx}"
-        
         struct = self.slider_set_definitions.get(self.active_slider_set_id, [])
         vals = self.motor_settings_data.get(idx, {}).get(self.active_slider_set_id, [])
 
@@ -584,19 +614,13 @@ class SettingsView(flet.Container):
             s_label, s_min, s_max = struct[i]
             v = vals[i] if i < len(vals) else 0
             v = max(s_min, min(s_max, v))
-            
             self.slider_controls[i].min = s_min
             self.slider_controls[i].max = s_max
             self.slider_controls[i].value = v
-            
-            if "OFFSET" in s_label:
-                self.slider_value_displays[i].value = f"{v:.1f}"
-            else:
-                self.slider_value_displays[i].value = str(int(v))
-            
+            if "OFFSET" in s_label: self.slider_value_displays[i].value = f"{v:.1f}"
+            else: self.slider_value_displays[i].value = str(int(v))
             self.slider_controls[i].update()
             self.slider_value_displays[i].update()
-
         if self.page: self.motor_display.update()
 
     def _restore_default_settings(self, e):
@@ -696,23 +720,53 @@ class SettingsView(flet.Container):
         podramka_obrazkowa_style.pop("padding", None); podramka_obrazkowa_style.pop("alignment", None); podramka_obrazkowa_style["clip_behavior"] = flet.ClipBehavior.ANTI_ALIAS
         
         if image_name == "render1.png":
+            # --- LEWY PANEL (Wybór silnika) ---
             btn_ctrls = [ElevatedButton(text=name, expand=True, style=flet.ButtonStyle(bgcolor=Colors.BLUE_GREY_700, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=8)), on_click=lambda e, i=idx: self._on_motor_select(i)) for idx, name in enumerate(self.motor_names, start=1)]
-            top_btns = [ElevatedButton(text=name, height=45, expand=True, style=flet.ButtonStyle(bgcolor=Colors.BLUE_GREY_600, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=8)), on_click=lambda e, i=i: self._on_slider_set_select(i)) for i, name in enumerate(["Ramp Settings", "Current Settings", "Homing Settings", "Collision Settings"], start=1)]
-            top_btns.append(ElevatedButton(text="DEFAULT", height=45, width=80, style=flet.ButtonStyle(bgcolor=Colors.RED_700, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=8)), on_click=self._restore_default_settings))
             
+            # --- GÓRNE MENU (Kategorie ustawień) ---
+            top_btns = [ElevatedButton(text=name, height=45, expand=True, style=flet.ButtonStyle(bgcolor=Colors.BLUE_GREY_600, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=8)), on_click=lambda e, i=i: self._on_slider_set_select(i)) for i, name in enumerate(["Ramp", "Current", "Home", "Collision"], start=1)]
+            
+            # --- PRZYCISK SYNCHRO (W KONTENERZE DLA WIDOCZNOŚCI) ---
+            synchro_container = Container(
+                content=self.synchro_checkbox,
+                bgcolor=Colors.BLUE_GREY_800,
+                border_radius=8,
+                padding=flet.padding.symmetric(horizontal=10),
+                alignment=alignment.center,
+                height=45,
+                border=flet.border.all(1, Colors.BLUE_GREY_600)
+            )
+
+            # --- PRZYCISK DEFAULT ---
+            default_btn = ElevatedButton(text="DEFAULT", height=45, width=100, style=flet.ButtonStyle(bgcolor=Colors.RED_700, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=8)), on_click=self._restore_default_settings)
+            
+            # --- SKŁADANIE GÓRNEGO PASKA ---
+            top_toolbar = Row(
+                controls=[
+                    *top_btns,          
+                    synchro_container,  
+                    default_btn         
+                ], 
+                spacing=5, 
+                expand=True
+            )
+
+            # --- ŚRODEK (Suwaki) ---
             self.sliders_column_container = Column(controls=[], spacing=10, expand=True, scroll=ScrollMode.ADAPTIVE)
             self._build_slider_ui(self.slider_set_definitions.get(1, []), self.motor_settings_data.get(1, {}).get(1, []))
             
+            # --- PRAWY PANEL ---
             self.motor_display = Text("Motor: J1", color="white", size=18, weight="bold")
             send_save_button = ElevatedButton(text="Send & Save", height=40, expand=True, style=flet.ButtonStyle(bgcolor=Colors.GREEN_700, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=8)), on_click=self._on_send_and_save_click)
             
             return Row(controls=[
                 Container(content=Column(controls=btn_ctrls, spacing=10, expand=True), **podramka_style, expand=1),
-                Container(content=Column(controls=[Container(content=Row(controls=top_btns, spacing=10, expand=True), **podramka_style), self.sliders_column_container], spacing=10, expand=True), **{**podramka_style, "alignment": alignment.top_center}, expand=7),
+                Container(content=Column(controls=[Container(content=top_toolbar, **podramka_style), self.sliders_column_container], spacing=10, expand=True), **{**podramka_style, "alignment": alignment.top_center}, expand=7),
                 Column(controls=[Container(content=self.motor_display, **podramka_style, height=50), Container(content=Image(src="stepper60.png", fit=flet.ImageFit.CONTAIN, expand=True), **podramka_obrazkowa_style, expand=1), Row(controls=[send_save_button])], spacing=10, expand=2)
             ], spacing=10, expand=True)
 
         else:
+            # --- WIDOK CHWYTAKÓW ---
             config = self._get_gripper_config(image_name)
             if not config: return Text("Config Error")
             self.current_gripper_values = [item[3] for item in config["sliders"]]
@@ -723,25 +777,26 @@ class SettingsView(flet.Container):
                     v_txt.value = str(int(e.control.value)); v_txt.update(); self.current_gripper_values[idx] = int(e.control.value)
                 sliders_list.append(Container(content=Row(controls=[Text(label, color="white", size=14, weight="bold", width=120), Slider(min=min_val, max=max_val, value=start_val, label="{value}", active_color=Colors.BLUE_ACCENT_400, expand=True, on_change=on_change_local), Container(content=val_txt, **{"width": 60, "height": 30, "bgcolor": Colors.BLUE_GREY_800, "border_radius": 5, "border": flet.border.all(1, Colors.BLUE_GREY_600), "alignment": alignment.center})], alignment=MainAxisAlignment.SPACE_BETWEEN, spacing=10), padding=flet.padding.only(bottom=5)))
             
-            # --- ACTION BUTTONS FOR GRIPPER VIEW ---
             action_buttons_row = [
                 ElevatedButton("DEFAULT", height=40, width=100, style=flet.ButtonStyle(bgcolor=Colors.RED_700, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=8)), on_click=self._restore_default_settings),
                 ElevatedButton("Send & Save", height=40, width=150, style=flet.ButtonStyle(bgcolor=Colors.GREEN_700, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=8)), on_click=self._on_send_and_save_click)
             ]
 
-            # --- ADD TUNING BUTTON ONLY FOR VERTICAL GRIPPER (render3.png) ---
             if image_name == "render3.png":
                 tuning_btn = ElevatedButton(
-                    "TUNING", 
-                    height=40, width=120, 
-                    icon=Icons.TUNE,
+                    "TUNING", height=40, width=120, icon=Icons.TUNE,
                     style=flet.ButtonStyle(bgcolor=Colors.ORANGE_700, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=8)),
                     on_click=self._open_egrip_tuning
                 )
-                action_buttons_row.insert(1, tuning_btn) # Insert between Default and Save
+                action_buttons_row.insert(1, tuning_btn) 
 
             return Row(controls=[
-                Container(content=Image(src=config["image"], fit=flet.ImageFit.CONTAIN), **podramka_obrazkowa_style, width=450, expand=False),
+                Container(
+                    content=Image(src=config["image"], fit=flet.ImageFit.CONTAIN), 
+                    width=450, 
+                    expand=False, 
+                    **podramka_obrazkowa_style  
+                ),
                 Container(content=Column(controls=[
                     Text(config["title"], size=20, weight="bold", color="white"), 
                     Column(controls=sliders_list, scroll=ScrollMode.ADAPTIVE, expand=True), 

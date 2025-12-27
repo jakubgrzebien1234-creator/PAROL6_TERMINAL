@@ -43,7 +43,7 @@ def main(page: ft.Page):
         communicator = DummyComm()
     
     page.bgcolor = "#1C1C1C"
-    page.padding = 10 
+    page.padding = 0  # Padding 0, żeby Stack wypełnił całe okno
     
     # Ustawienie folderu assets
     assets_dir = os.path.join(os.getcwd(), "resources")
@@ -61,8 +61,31 @@ def main(page: ft.Page):
         "padding": 10
     }
 
-    # Słownik widoków (deklarujemy wcześniej, żeby był widoczny w toggle_connection)
+    # Słownik widoków
     views = {}
+
+    # --- EKRAN ESTOP (Overlay) ---
+    # To jest warstwa, która przykryje wszystko
+    estop_overlay = ft.Container(
+        content=ft.Column(
+            controls=[
+                ft.Icon(name=ft.Icons.WARNING_ROUNDED, color="white", size=80),
+                ft.Text("EMERGENCY STOP ACTIVE", size=50, weight=ft.FontWeight.BOLD, color="white", text_align=ft.TextAlign.CENTER),
+                ft.Image(src="ESTOP.png", width=250, height=250, fit=ft.ImageFit.CONTAIN, error_content=ft.Text("BRAK ZDJĘCIA ESTOP", color="white")),
+                ft.Text("System Halted. Release E-Stop button to resume.", size=20, color="white")
+            ],
+            alignment=ft.MainAxisAlignment.CENTER,
+            horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=20
+        ),
+        bgcolor=ft.Colors.with_opacity(0.95, "#B00020"), # Czerwone tło, lekko przezroczyste lub pełne
+        alignment=ft.alignment.center,
+        visible=False, # Domyślnie ukryte
+        expand=True,
+        padding=20,
+        # Zablokowanie interakcji z tym co pod spodem:
+        on_click=lambda e: print("System locked!") 
+    )
 
     # --- 1. LOGIKA I UI DLA PORTU SZEREGOWEGO ---
     
@@ -83,7 +106,6 @@ def main(page: ft.Page):
     )
 
     def refresh_ports(e=None):
-        """Skanuje dostępne porty COM i aktualizuje listę."""
         ports = serial.tools.list_ports.comports()
         port_names = [p.device for p in ports]
         dd_ports.options = [ft.dropdown.Option(p) for p in port_names]
@@ -92,7 +114,6 @@ def main(page: ft.Page):
         page.update()
 
     def toggle_connection(e):
-        """Obsługa przycisku połącz/rozłącz."""
         if communicator.is_open():
             communicator.disconnect()
             btn_connect.icon = ft.Icons.LINK_OFF
@@ -115,22 +136,14 @@ def main(page: ft.Page):
                     if "STATUS" in views and views["STATUS"]:
                         views["STATUS"].update_status("Stan połączenia", "Połączono", ft.Colors.GREEN_400)
 
-                    # >>> POPRAWKA: Synchronizacja w wątku z opóźnieniem <<<
                     def delayed_sync():
-                        # Czekamy 2 sekundy, aż STM32 wstanie po resecie DTR
                         print("Czekam na start STM32...")
                         time.sleep(2.0) 
-                        
-                        # Teraz wysyłamy konfigurację
                         if "SETTINGS" in views and views["SETTINGS"]:
                             print("Uruchamiam synchronizację...")
-                            # Musimy użyć page z głównego wątku, ale wywołujemy to z tła
-                            # Flet jest thread-safe przy page.update, ale lepiej robić to ostrożnie
                             views["SETTINGS"].upload_configuration(page)
 
-                    # Uruchamiamy wątek w tle, żeby nie zawiesić GUI
                     threading.Thread(target=delayed_sync, daemon=True).start()
-                    # >>> KONIEC POPRAWKI <<<
 
             else:
                 print("Nie wybrano portu!")
@@ -244,7 +257,7 @@ def main(page: ft.Page):
         if "STATUS" in views and views["STATUS"]:
             views["STATUS"].update_status(key, value, color)
 
-    # Inicjalizujemy widoki (views zadeklarowane wyżej)
+    # Inicjalizujemy widoki
     if JogView:
         views["JOG"] = JogView(uart_communicator=communicator, on_status_update=global_status_updater)
     if CartesianView:
@@ -261,250 +274,177 @@ def main(page: ft.Page):
         views["ERRORS"] = ErrorsView()
 
     def handle_uart_data(data_string):
-        """
-        Główna funkcja parsująca dane z UART w main.py
-        """
-        # --- DEBUG: Odkomentuj, jeśli chcesz widzieć surowe dane w konsoli ---
-        # print(f"[RAW]: {repr(data_string)}")
-
-        # 1. Czyszczenie danych
-        data_string = data_string.strip()
-        if not data_string:
-            return
-
-        # ==========================================================
-        # 2. HOMING I ODBLOKOWANIE
-        # ==========================================================
-        if "HOMING_COMPLETE_OK" in data_string:
-            if "SETTINGS" in views and views["SETTINGS"]:
-                views["SETTINGS"].on_homing_complete_signal()
-        
-            # --- ODBLOKUJ JOG ---
-            if "JOG" in views and views["JOG"]:
-                views["JOG"].set_homed_status(True)
+            """
+            Główna funkcja parsująca dane z UART w main.py
+            """
+            data_string = data_string.strip()
+            if not data_string: return
+            # ==========================================================
+            # 0. OBSŁUGA ESTOP
+            # ==========================================================
+            if "ESTOP_TRIGGER" in data_string:
+                print("[MAIN] !!! ESTOP TRIGGERED !!!")
                 
-            return
-
-        # ==========================================================
-        # 3. DEBUGOWANIE SILNIKÓW (J1_DBG...)
-        # ==========================================================
-        if "_DBG" in data_string:
-            if "SETTINGS" in views and views["SETTINGS"]:
-                try:
-                    # Przekazujemy do SettingsView (do okna tuningu silników)
-                    views["SETTINGS"].handle_stall_alert(data_string)
-                except: pass
-            return 
-
-        # ==========================================================
-        # 4. TUNING CHWYTAKA (EGRIPSGRESLUT...) - NOWOŚĆ
-        # ==========================================================
-        # To jest konieczne dla przycisku TUNNING w zakładce SGGRIP
-        if "EGRIPSGRESULT" in data_string:
-            if "SETTINGS" in views and views["SETTINGS"]:
-                try:
-                    views["SETTINGS"].handle_stall_alert(data_string)
-                except: pass
-            return
-
-        # ==========================================================
-        # 5. WYKRYCIE UTYKU (STALL)
-        # ==========================================================
-        if "STALL" in data_string:
-            # 1. Przekazujemy do widoku ustawień (czerwony alert)
-            if "SETTINGS" in views and views["SETTINGS"]:
-                try:
-                    views["SETTINGS"].handle_stall_alert(data_string)
-                except: pass
-
-            # 2. Logowanie do zakładki błędów
-            if "ERRORS" in views and views["ERRORS"]:
-                views["ERRORS"].add_log("WARNING", f"Wykryto utyk: {data_string}")
-            
-            return
-
-        # ==========================================================
-        # 6. STARA OBSŁUGA SG (Kompatybilność)
-        # ==========================================================
-        if data_string.startswith("SG"):
-            parts = data_string.split('_')
-            if len(parts) == 2:
-                klucz = parts[0]   # np. SG1
-                wartosc = parts[1] # np. 120
-                
-                kolor = ft.Colors.GREEN_400
-                try:
-                    if int(wartosc) < 50: kolor = ft.Colors.RED_400
-                except: pass
-
-                if "STATUS" in views and views["STATUS"]:
-                    views["STATUS"].update_status(klucz, wartosc, kolor)
-                
+                # 1. ZAMYKANIE OKNA BAZOWANIA W SETTINGS
                 if "SETTINGS" in views and views["SETTINGS"]:
                     try:
-                        # Jeśli masz starą metodę update_stall_display, w przeciwnym razie to pominie
-                        if hasattr(views["SETTINGS"], 'update_stall_display'):
-                            views["SETTINGS"].update_stall_display(klucz, wartosc)
-                    except: pass
-            return
+                        views["SETTINGS"].close_homing_dialog()
+                    except Exception as e:
+                        print(f"Błąd zamykania dialogu SETTINGS: {e}")
 
-        # ==========================================================
-        # 7. POMPY / ZAWORY
-        # ==========================================================
-        if "VAC_ON" in data_string:
-            if "STATUS" in views and views["STATUS"]:
-                views["STATUS"].update_status("Pompa", "WŁĄCZONA", ft.Colors.GREEN_400)
-            return
+                # 2. ZAMYKANIE OKNA BAZOWANIA W JOG (TEGO BRAKOWAŁO!)
+                if "JOG" in views and views["JOG"]:     # ### <--- DODAJ TO
+                    try:
+                        # Ustawiamy status na False (homing przerwany) - to zamknie okno
+                        views["JOG"].set_homed_status(False)
+                        print("[MAIN] Wymuszono zamknięcie dialogu w JOG przez ESTOP")
+                    except Exception as e:
+                        print(f"Błąd zamykania dialogu JOG: {e}")
 
-        if "VAC_OFF" in data_string:
-            if "STATUS" in views and views["STATUS"]:
-                views["STATUS"].update_status("Pompa", "WYŁĄCZONA", ft.Colors.RED_400)
-            return
-
-        if "VALVEON" in data_string:
-            if "STATUS" in views and views["STATUS"]:
-                views["STATUS"].update_status("Zawór", "ZAMKNIĘTY", ft.Colors.ORANGE_400)
-            return
-
-        if "VALVEOFF" in data_string:
-            if "STATUS" in views and views["STATUS"]:
-                views["STATUS"].update_status("Zawór", "OTWARTY", ft.Colors.GREEN_400)
-            return
-
-        # ==========================================================
-        # 8. CIŚNIENIE
-        # ==========================================================
-        # Próba 1: Sama liczba
-        if data_string.replace('.','',1).isdigit():
-            try:
-                pressure_val = float(data_string)
-                if "STATUS" in views and views["STATUS"]:
-                    views["STATUS"].update_status("Ciśnienie", f"{pressure_val:.2f} kPa", ft.Colors.CYAN_400)
-                return
-            except ValueError: pass
-
-        # Próba 2: Format P:
-        if data_string.startswith("P:"):
-            try:
-                val = data_string.split(":")[1].strip()
-                if "STATUS" in views and views["STATUS"]:
-                    views["STATUS"].update_status("Ciśnienie", val + " kPa") 
-            except: pass
-            return
-
-        # ==========================================================
-        # 9. BŁĘDY OGÓLNE
-        # ==========================================================
-        if data_string.startswith("ERROR_"):
-            tresc_bledu = data_string[6:].strip() 
-            if "ERRORS" in views and views["ERRORS"]:
-                views["ERRORS"].add_log("ERROR", tresc_bledu)
-            return 
-
-        # ==========================================================
-        # 10. POZYCJE OSI (JOG & CARTESIAN)
-        # ==========================================================
-        if data_string.startswith("A_"):
-            try:
-                # Format: A_val1_val2...
-                content = data_string[2:]
-                parts = [p for p in content.split('_') if p.strip()]
+                # 3. Pokaż czerwoną nakładkę ESTOP
+                estop_overlay.visible = True
+                page.update()
                 
-                if len(parts) == 6:
-                    joint_values = {
-                        "J1": float(parts[0]),
-                        "J2": float(parts[1]),
-                        "J3": float(parts[2]),
-                        "J4": float(parts[3]),
-                        "J5": float(parts[4]),
-                        "J6": float(parts[5])
-                    }
+                return
+            
+            # --- DODAJ TO TUTAJ (Pod spodem) ---
+            if "ESTOP_RELEASE" in data_string or "ESTOP_OFF" in data_string:
+                print("[MAIN] ESTOP ZWOLNIONY - Ukrywam czerwony ekran")
+                estop_overlay.visible = False
+                page.update()
+                return
 
-                    # Aktualizacja JOG (FK)
-                    if "JOG" in views and views["JOG"]:
-                        views["JOG"].update_joints_and_fk(joint_values)
-                    
-                    # Aktualizacja Cartesian (jeśli jest potrzebna)
-                    if "CARTESIAN" in views and views["CARTESIAN"]:
-                        if hasattr(views["CARTESIAN"], '_on_uart_data'):
-                            views["CARTESIAN"]._on_uart_data(data_string)
+            # ==========================================================
+            # 2. HOMING I ODBLOKOWANIE (Z DIAGNOSTYKĄ)
+            # ==========================================================
+            # ... wewnątrz handle_uart_data ...
+            if "HOMING_COMPLETE_OK" in data_string:
+                print("\n[MAIN DEBUG] >>> OTRZYMANO SYGNAŁ: HOMING_COMPLETE_OK <<<") 
+                
+                # Debugowanie SETTINGS
+                if "SETTINGS" in views and views["SETTINGS"]:
+                    print("[MAIN DEBUG] Znalazłem widok SETTINGS, wywołuję set_homed_status...")
+                    views["SETTINGS"].set_homed_status(True)
+                
+                # Debugowanie JOG
+                if "JOG" in views and views["JOG"]:
+                    print("[MAIN DEBUG] Znalazłem widok JOG, wywołuję set_homed_status...")
+                    views["JOG"].set_homed_status(True)
+                else:
+                    print("[MAIN DEBUG] !!! BŁĄD: Nie znaleziono widoku JOG w słowniku views !!!")
+                
+                return
 
-            except Exception as e:
-                # print(f"Błąd ramki A_: {e}")
-                pass
-            return
+            # ==========================================================
+            # 3. OBSŁUGA TUNINGU I DIAGNOSTYKI SILNIKÓW
+            # ==========================================================
+            if "SGRESULT" in data_string or "COLLISION" in data_string:
+                if "SETTINGS" in views and views["SETTINGS"]:
+                    try: views["SETTINGS"].handle_stall_alert(data_string)
+                    except: pass
+                if "COLLISION" in data_string and "ERRORS" in views and views["ERRORS"]:
+                    views["ERRORS"].add_log("WARNING", f"Kolizja/Utyk: {data_string}")
+                return
 
-        # ==========================================================
-        # 11. KRAŃCÓWKI (LIMIT SWITCHES)
-        # ==========================================================
-        if data_string.startswith("LIMITSWITCH_"):
-            if "STATUS" in views and views["STATUS"]:
+            if "_DBG" in data_string:
+                if "SETTINGS" in views and views["SETTINGS"]:
+                    try:
+                        views["SETTINGS"].parse_debug_line(data_string)
+                        views["SETTINGS"].handle_stall_alert(data_string)
+                    except: pass
+                return 
+
+            if "EGRIPSGRESULT" in data_string:
+                if "SETTINGS" in views and views["SETTINGS"]:
+                    try: views["SETTINGS"].handle_stall_alert(data_string)
+                    except: pass
+                return
+
+            if "STALL" in data_string:
+                if "SETTINGS" in views and views["SETTINGS"]:
+                    try: views["SETTINGS"].handle_stall_alert(data_string)
+                    except: pass
+                if "ERRORS" in views and views["ERRORS"]:
+                    views["ERRORS"].add_log("WARNING", f"Wykryto utyk: {data_string}")
+                return
+
+            # ==========================================================
+            # 4. POMPY / ZAWORY
+            # ==========================================================
+            if "VAC_ON" in data_string:
+                if "STATUS" in views and views["STATUS"]:
+                    views["STATUS"].update_status("Pompa", "WŁĄCZONA", ft.Colors.GREEN_400)
+                return
+            if "VAC_OFF" in data_string:
+                if "STATUS" in views and views["STATUS"]:
+                    views["STATUS"].update_status("Pompa", "WYŁĄCZONA", ft.Colors.RED_400)
+                return
+            if "VALVEON" in data_string:
+                if "STATUS" in views and views["STATUS"]:
+                    views["STATUS"].update_status("Zawór", "ZAMKNIĘTY", ft.Colors.ORANGE_400)
+                return
+            if "VALVEOFF" in data_string:
+                if "STATUS" in views and views["STATUS"]:
+                    views["STATUS"].update_status("Zawór", "OTWARTY", ft.Colors.GREEN_400)
+                return
+
+            # ==========================================================
+            # 5. POZYCJE OSI (JOG & CARTESIAN - GLOBALNE)
+            # ==========================================================
+            if data_string.startswith("A_"):
                 try:
-                    # Format: LIMITSWITCH_0,0,1,0,0,0
-                    raw_vals = data_string.replace("LIMITSWITCH_", "")
-                    parts = raw_vals.split(',')
+                    content = data_string[2:]
+                    parts = [p for p in content.split('_') if p.strip()]
                     
-                    if len(parts) >= 6:
-                        for i in range(6):
-                            val = parts[i].strip()
-                            key = f"LS{i+1}" 
-                            
-                            if val == "1":
-                                views["STATUS"].update_status(key, "PRESSED", ft.Colors.RED_400)
-                            else:
-                                views["STATUS"].update_status(key, "RELEASED", ft.Colors.GREEN_400)
-                except Exception as e:
-                    print(f"Błąd parsowania krańcówek: {e}")
-            return
+                    if len(parts) == 6:
+                        joint_values = {
+                            "J1": float(parts[0]), "J2": float(parts[1]),
+                            "J3": float(parts[2]), "J4": float(parts[3]),
+                            "J5": float(parts[4]), "J6": float(parts[5])
+                        }
 
-        # ==========================================================
-        # 12. PROTOKÓŁ STATUSU (PROT_)
-        # ==========================================================
-        if data_string.startswith("PROT_"):
-            if "STATUS" in views and views["STATUS"]:
-                try:
-                    raw_vals = data_string.replace("PROT_", "")
-                    parts = raw_vals.split(',')
-                    
-                    if len(parts) >= 8:
-                        # --- 1. Zasilanie (0/1) ---
-                        def get_flag_status(val_str):
-                            return ("OK", ft.Colors.GREEN_400) if val_str.strip() == "1" else ("BŁĄD", ft.Colors.RED_400)
-
-                        txt, col = get_flag_status(parts[0])
-                        views["STATUS"].update_status("PWR3V3", txt, col)
+                        if "JOG" in views and views["JOG"]:
+                            views["JOG"].update_joints_and_fk(joint_values)
                         
-                        txt, col = get_flag_status(parts[1])
-                        views["STATUS"].update_status("PWR5V", txt, col)
+                        if "CARTESIAN" in views and views["CARTESIAN"]:
+                            if hasattr(views["CARTESIAN"], '_on_uart_data'):
+                                views["CARTESIAN"]._on_uart_data(data_string)
 
-                        txt, col = get_flag_status(parts[2])
-                        views["STATUS"].update_status("PWROK", txt, col)
-
-                        txt, col = get_flag_status(parts[3])
-                        views["STATUS"].update_status("PWRSTAT", txt, col)
-
-                        # --- 2. Temperatury ---
-                        def format_temp(val_str):
-                            try:
-                                temp_val = float(val_str)
-                                if temp_val <= -99.0:
-                                    return "NOT CONN.", ft.Colors.GREY_500
+                        if "SETTINGS" in views and views["SETTINGS"]:
+                            settings = views["SETTINGS"]
+                            idx = settings.selected_motor_index
+                            key = f"J{idx}"
+                            
+                            if key in joint_values:
+                                raw_val = joint_values[key]
+                                if key in ["J1", "J2", "J3", "J4", "J5"]:
+                                    settings.current_test_pos = -raw_val
                                 else:
-                                    return f"{temp_val:.2f} °C", ft.Colors.ORANGE_300
-                            except ValueError:
-                                return "ERR", ft.Colors.RED_400
+                                    settings.current_test_pos = raw_val
 
-                        views["STATUS"].update_status("TEMP1", format_temp(parts[4])[0], format_temp(parts[4])[1])
-                        views["STATUS"].update_status("TEMP2", format_temp(parts[5])[0], format_temp(parts[5])[1])
-                        views["STATUS"].update_status("TEMP3", format_temp(parts[6])[0], format_temp(parts[6])[1])
-                        views["STATUS"].update_status("TEMP4", format_temp(parts[7])[0], format_temp(parts[7])[1])
+                except: pass
+                return
 
-                except Exception as e:
-                    print(f"Błąd parsowania PROT_: {e}")
-            return
+            # ==========================================================
+            # 6. BŁĘDY OGÓLNE
+            # ==========================================================
+            if data_string.startswith("ERROR_"):
+                if "ERRORS" in views and views["ERRORS"]:
+                    views["ERRORS"].add_log("ERROR", data_string[6:].strip())
+                return 
 
+            # ==========================================================
+            # 9. INNE FORMATY (Zabezpieczenie)
+            # ==========================================================
+            if any(x in data_string for x in ["J1", "J2", "J3", "J4", "J5", "J6"]) and \
+               any(x in data_string for x in ["_", ":", "="]):
+                if "_DBG" not in data_string and "COLLISION" not in data_string and "A_" not in data_string:
+                     if "SETTINGS" in views and views["SETTINGS"]:
+                        try: views["SETTINGS"].handle_stall_alert(data_string)
+                        except: pass
 
     communicator.on_data_received = handle_uart_data
+    
     # 2. ŚRODEK
     frame_middle = ft.Container(
         content=None, 
@@ -563,7 +503,32 @@ def main(page: ft.Page):
         **STYL_RAMKI 
     )
 
-    page.add(frame_top, frame_middle, frame_bottom)
+    # --- ZŁOŻENIE GŁÓWNEGO LAYOUTU W COLUMN ---
+    # Musimy to zgrupować, żeby potem wrzucić do Stacka POD overlay estopa
+    main_layout_column = ft.Column(
+        controls=[frame_top, frame_middle, frame_bottom],
+        expand=True,
+        spacing=10
+    )
+    
+    # Dodajemy padding do głównego kontenera aplikacji, 
+    # żeby zachować marginesy (10px) z Twojego oryginału, ale nie dla ESTOP
+    main_layout_container = ft.Container(
+        content=main_layout_column,
+        padding=10,
+        expand=True
+    )
+
+    # --- GLÓWNY STACK (WARSTWY) ---
+    root_stack = ft.Stack(
+        controls=[
+            main_layout_container, # Warstwa 0: Aplikacja
+            estop_overlay          # Warstwa 1: ESTOP (nad aplikacją)
+        ],
+        expand=True
+    )
+
+    page.add(root_stack)
     
     # --- Wątek zegara ---
     def clock_updater():
@@ -611,6 +576,7 @@ if __name__ == "__main__":
     init_py = os.path.join(gui_dir, "__init__.py")
     if not os.path.exists(init_py): open(init_py, 'a').close()
     
+    # Generowanie placeholdera dla AT
     at_img_path = os.path.join(resources_dir, "AT.png")
     if not os.path.exists(at_img_path) and Image:
         img = Image.new('RGB', (100, 100), color="#0055A4")
@@ -618,10 +584,18 @@ if __name__ == "__main__":
         img.paste(img_draw, (25, 25))
         img.save(at_img_path)
         
+    # Generowanie placeholdera dla PoweredBy
     poweredby_img_path = os.path.join(resources_dir, "poweredby.png")
     if not os.path.exists(poweredby_img_path) and Image:
         Image.new('RGB', (200, 80), color="purple").save(poweredby_img_path)
 
+    # Generowanie placeholdera dla ESTOP (jeśli nie masz pliku)
+    estop_img_path = os.path.join(resources_dir, "ESTOP.png")
+    if not os.path.exists(estop_img_path) and Image:
+        # Czerwony kwadrat z napisem STOP (symulacja)
+        Image.new('RGB', (300, 300), color="#FF0000").save(estop_img_path)
+
+    # Generowanie przycisków
     button_image_files = ["JOG.png", "CARTESIAN.png", "SETTINGS.png", "STATUS.png", "ERRORS.png"]
     button_colors = ["#FF6347", "#1E90FF", "#32CD32", "#FFD700", "#DC143C"]
     for img_file, color in zip(button_image_files, button_colors):

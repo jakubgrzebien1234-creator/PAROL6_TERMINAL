@@ -500,4 +500,29 @@
     <selfCollide>true</selfCollide> 
   </gazebo>
 
+
+  <joint name="joint_tcp" type="fixed">
+    <parent link="L6"/>
+    <child link="tcp_link"/>
+    <origin xyz="0 0 0.15" rpy="0 1.5708 0"/>
+  </joint>
+
+  <link name="tcp_link">
+    <inertial>
+      <origin xyz="0 0 0.15" rpy="0 1.5708 0"/>
+      <mass value="0.001"/>
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0"/>
+    </inertial>
+    
+    <visual>
+      <origin xyz="0 0 0.15" rpy="0 1.5708 0"/>
+      <geometry>
+        <sphere radius="0.005"/>
+      </geometry>
+      <material name="red_tcp">
+        <color rgba="1 0 0 1"/>
+      </material>
+    </visual>
+  </link>
+
 </robot>
