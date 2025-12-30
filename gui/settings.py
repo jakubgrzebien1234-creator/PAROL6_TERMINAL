@@ -219,7 +219,7 @@ class SettingsView(flet.Container):
             return
 
         # 4. CHWYTAK (EGRIP)
-        if "EGRIPSGRESULT_" in clean_str:
+        if "SG: " in clean_str:
             try:
                 val = clean_str.split("_")[1].strip()
                 if (self.egrip_tuning_dialog and self.egrip_tuning_dialog.open and self.egrip_sg_result_text.page):

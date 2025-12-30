@@ -5,8 +5,7 @@ import math
 
 class JogView(flet.Container):
     """
-    JOG View - Wersja naprawiona
-    Poprawnie zamyka okno Homing po otrzymaniu sygnału.
+    JOG View - Wersja z wysyłaniem grupowym (J_...)
     """
 
     def __init__(self, uart_communicator, on_status_update=None):
@@ -19,6 +18,8 @@ class JogView(flet.Container):
         self.AXIS_DIRECTIONS = {
             "J1": -1, "J2": -1, "J3": -1, "J4": -1, "J5": -1, "J6": -1
         }
+        # Te osie będą wyświetlane z odwrotnym znakiem w GUI (dla użytkownika), 
+        # ale do robota wysyłane są "surowe" wartości zgodne z wewnętrzną logiką.
         self.DISPLAY_INVERTED = ["J1", "J2", "J3", "J4", "J5"]
         
         # --- ZMIENNE STANU ---
@@ -27,15 +28,16 @@ class JogView(flet.Container):
         self.speed_percent = 50 
         self.is_robot_homed = False 
         
-        # Zmienna przechowująca referencję do okna dialogowego
         self.homing_loading_dialog = None
 
         self.gripper_states = {"pneumatic": False, "electric": False}
         self.current_raw_values = { f"J{i}": 0.0 for i in range(1, 7) }
+        
+        # Wewnętrzne cele (to co chcemy osiągnąć)
         self.internal_target_values = { f"J{i}": 0.0 for i in range(1, 7) }
         self.initial_sync_done = False
 
-        # Limity i parametry DH
+        # Limity
         self.joint_limits = {
             "J1": (-90, 90), "J2": (-50, 140), "J3": (-100, 70),
             "J4": (-100, 180), "J5": (-120, 110), "J6": (-110, 180) 
@@ -55,7 +57,6 @@ class JogView(flet.Container):
         self._setup_ui()
 
     def _setup_ui(self):
-        # [Tutaj UI bez zmian, skrócone dla czytelności]
         panel_style = {"bgcolor": "#2D2D2D", "border_radius": 10, "border": flet.border.all(1, "#555555"), "padding": 10}
 
         motors_column = flet.Column(spacing=5, expand=True)
@@ -118,6 +119,30 @@ class JogView(flet.Container):
         position_frame = flet.Container(content=pos_list, **panel_style, expand=4)
         self.content = flet.Row([motors_container, tools_container, position_frame], spacing=10, vertical_alignment=flet.CrossAxisAlignment.STRETCH)
 
+    # -------------------------------------------------------------------------
+    # >>> NOWA FUNKCJA: WYSYŁANIE WSZYSTKICH OSI <<<
+    # -------------------------------------------------------------------------
+    def send_all_joints(self):
+        """
+        Wysyła zbiorczą ramkę: J_v1,v2,v3,v4,v5,v6
+        Pobiera wartości z self.internal_target_values.
+        """
+        if self.uart and self.uart.is_open():
+            try:
+                # Pobierz wartości w kolejności J1...J6
+                vals = [self.internal_target_values.get(f"J{i}", 0.0) for i in range(1, 7)]
+                
+                # Zbuduj string: "J_10.0,20.0,-5.0,..."
+                # Używamy .2f dla precyzji
+                data_str = ",".join([f"{v:.2f}" for v in vals])
+                cmd = f"J_{data_str}"
+                
+                # Wyślij (biblioteka communication dodaje \r\n zazwyczaj, 
+                # ale jeśli nie, upewnij się w communication.py)
+                self.uart.send_message(cmd)
+            except Exception as e:
+                print(f"[JOG] Błąd wysyłania: {e}")
+
     def update_joints_and_fk(self, joint_values: dict):
         for k, v in joint_values.items():
             self.current_raw_values[k] = v 
@@ -151,10 +176,10 @@ class JogView(flet.Container):
                 elif new_target > max_limit: new_target = max_limit
 
             self.internal_target_values[joint_code] = new_target
-            if self.uart and self.uart.is_open():
-                try: 
-                    self.uart.send_message(f"J{joint_code[1]}_{new_target:.2f}")
-                except: pass
+            
+            # >>> ZMIANA: Zamiast wysyłać J1_..., wysyłamy wszystko <<<
+            self.send_all_joints()
+            
             time.sleep(0.05)
 
     def on_jog_start(self, e, joint_code, direction, btn):
@@ -176,24 +201,20 @@ class JogView(flet.Container):
         btn.content.border = flet.border.all(1, "#666")
         btn.content.update()
 
-    # --- KLUCZOWA METODA DO ZAMYKANIA OKNA ---
     def set_homed_status(self, is_homed: bool):
-        print(f"[JOG] set_homed_status wywołane: {is_homed}") # DEBUG
+        print(f"[JOG] set_homed_status wywołane: {is_homed}") 
         self.is_robot_homed = is_homed
         if is_homed:
             self.internal_target_values = { f"J{i}": 0.0 for i in range(1, 7) }
             self.initial_sync_done = True 
 
         if self.page:
-            # Zamykanie okna dialogowego
             if self.homing_loading_dialog:
-                print("[JOG] Zamykam dialog...") # DEBUG
                 self.homing_loading_dialog.open = False
                 self.page.update()
                 try:
                     self.page.close(self.homing_loading_dialog)
-                except Exception as e:
-                    print(f"Błąd close: {e}")
+                except Exception: pass
                 self.homing_loading_dialog = None
             
             msg = "Robot homed!" if is_homed else "Homing lost!"
@@ -210,7 +231,6 @@ class JogView(flet.Container):
 
     def _show_homing_progress_dialog(self):
         if not self.page: return
-        # Zabezpieczenie przed podwójnym oknem
         if self.homing_loading_dialog is not None: return
 
         self.homing_loading_dialog = flet.AlertDialog(
@@ -244,22 +264,20 @@ class JogView(flet.Container):
         if self.uart: self.uart.send_message("TOOL_CHANGE")
                 
     def on_standby_click(self, e):
-        if self.uart:
-            for i in range(1, 7): 
-                self.internal_target_values[f"J{i}"] = 0.0
-                self.uart.send_message(f"J{i}_0.00")
-                time.sleep(0.02)
+        # STANDBY: Zerujemy wszystkie cele i wysyłamy jedną ramkę
+        for i in range(1, 7): 
+            self.internal_target_values[f"J{i}"] = 0.0
+        self.send_all_joints()
                 
     def on_safety_click(self, e):
+        # SAFETY: Ustawiamy predefiniowane pozycje i wysyłamy jedną ramkę
         visual_targets = [0, 50, -70, -90, 0, 0]
-        if self.uart:
-            for i, vis_val in enumerate(visual_targets):
-                idx = f"J{i+1}"
-                raw_val = vis_val
-                if idx in self.DISPLAY_INVERTED: raw_val = -vis_val 
-                self.internal_target_values[idx] = raw_val
-                self.uart.send_message(f"{idx}_{raw_val:.2f}")
-                time.sleep(0.02)
+        for i, vis_val in enumerate(visual_targets):
+            idx = f"J{i+1}"
+            raw_val = vis_val
+            if idx in self.DISPLAY_INVERTED: raw_val = -vis_val 
+            self.internal_target_values[idx] = raw_val
+        self.send_all_joints()
     
     def change_speed(self, delta):
         self.speed_percent = max(10, min(100, self.speed_percent + delta))
