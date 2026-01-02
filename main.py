@@ -44,6 +44,7 @@ def main(page: ft.Page):
     
     page.bgcolor = "#1C1C1C"
     page.padding = 0  # Padding 0, żeby Stack wypełnił całe okno
+    page.window_full_screen = False  # Dla Raspberry Pi
     
     # Ustawienie folderu assets
     assets_dir = os.path.join(os.getcwd(), "resources")
@@ -190,17 +191,17 @@ def main(page: ft.Page):
     )
 
     # --- 2. KONTROLKI ZEGARA I DATY ---
-    clock_text = ft.Text(value="00:00:00", size=20, weight=ft.FontWeight.BOLD, color="white")
-    date_text = ft.Text(value="DD.MM.RRRR", size=20, weight=ft.FontWeight.NORMAL, color="white")
+    clock_text = ft.Text(value="00:00:00", size=16, weight=ft.FontWeight.BOLD, color="white")
+    date_text = ft.Text(value="DD.MM.RRRR", size=14, weight=ft.FontWeight.NORMAL, color="white")
     
     # --- 3. KONTROLKI TRYBU ---
-    mode_label = ft.Text(value="MODE:", size=22, weight=ft.FontWeight.NORMAL, color="white")
-    current_mode_text = ft.Text(value="JOG", size=22, weight=ft.FontWeight.BOLD, color="white")
+    mode_label = ft.Text(value="MODE:", size=16, weight=ft.FontWeight.NORMAL, color="white")
+    current_mode_text = ft.Text(value="JOG", size=16, weight=ft.FontWeight.BOLD, color="white")
 
-    at_logo = ft.Image(src="AT.png", height=60, error_content=ft.Text("AT", size=30, color="yellow"))
-    powered_by_logo = ft.Image(src="poweredby.png", height=60, error_content=ft.Text("PBY", size=14, color="red"))
+    at_logo = ft.Image(src="AT.png", height=40, error_content=ft.Text("AT", size=20, color="yellow"))
+    powered_by_logo = ft.Image(src="poweredby.png", height=40, error_content=ft.Text("PBY", size=12, color="red"))
     
-    parol_label = ft.Text("PAROL6", color="white", size=40, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER)
+    parol_label = ft.Text("PAROL6", color="white", size=28, weight=ft.FontWeight.BOLD, text_align=ft.TextAlign.CENTER)
     
     mode_block = ft.Column(
         controls=[mode_label, current_mode_text],
@@ -220,7 +221,7 @@ def main(page: ft.Page):
             ft.Container(
                 content=ft.Row(
                     controls=[at_logo, powered_by_logo],
-                    spacing=80,
+                    spacing=40,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER
                 ),
                 alignment=ft.alignment.center_left,
@@ -270,7 +271,7 @@ def main(page: ft.Page):
 
     frame_top = ft.Container(
         content=header_content, 
-        height=80, 
+        height=60, 
         **STYL_RAMKI_TOP 
     )
     
@@ -827,7 +828,7 @@ def main(page: ft.Page):
             data=name, 
             content=ft.Image(
                 src=img_file,
-                height=70,
+                height=50,
                 fit=ft.ImageFit.CONTAIN,
                 error_content=ft.Text(name, size=16, weight="bold", color="white") 
             ),
@@ -838,7 +839,7 @@ def main(page: ft.Page):
                     ft.ControlState.DEFAULT: ft.BorderSide(0, ft.Colors.TRANSPARENT),
                 }
             ),
-            height=90, 
+            height=65, 
             expand=True, 
             on_click=change_mode_clicked 
         )
@@ -910,8 +911,8 @@ def main(page: ft.Page):
         btn.on_click = wrapped_change_mode_clicked
 
     frame_bottom = ft.Container(
-        content=ft.Row(controls=footer_buttons, spacing=10), 
-        height=100,
+        content=ft.Row(controls=footer_buttons, spacing=5), 
+        height=70,
         **STYL_RAMKI 
     )
 
@@ -920,14 +921,14 @@ def main(page: ft.Page):
     main_layout_column = ft.Column(
         controls=[frame_top, frame_middle, frame_bottom],
         expand=True,
-        spacing=10
+        spacing=5
     )
     
     # Dodajemy padding do głównego kontenera aplikacji, 
     # żeby zachować marginesy (10px) z Twojego oryginału, ale nie dla ESTOP
     main_layout_container = ft.Container(
         content=main_layout_column,
-        padding=10,
+        padding=5,
         expand=True
     )
 

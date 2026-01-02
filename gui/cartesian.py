@@ -224,7 +224,7 @@ class CartesianView(flet.Container):
         
         self.last_jog_time = 0.0 # Debounce timer
 
-        self.padding = 10 
+        self.padding = 5 
 
         # Start update loop IMMEDIATELY
         self.update_thread = threading.Thread(target=self._update_loop, daemon=True)
@@ -246,9 +246,9 @@ class CartesianView(flet.Container):
         # ----------------------------------------------------------------------
         panel_style = {
             "bgcolor": "#2D2D2D", 
-            "border_radius": 10, 
+            "border_radius": 8, 
             "border": flet.border.all(1, "#555555"), 
-            "padding": 10
+            "padding": 5
         }
         
         # ----------------------------------------------------------------------
@@ -262,7 +262,7 @@ class CartesianView(flet.Container):
         ]
 
         # Use Grid-like structure (Rows of 2)
-        controls_column = flet.Column(spacing=5, expand=True)
+        controls_column = flet.Column(spacing=3, expand=True)
         for i in range(0, len(axes_list), 2):
             if i+1 < len(axes_list):
                 name1, code1 = axes_list[i]
@@ -271,11 +271,11 @@ class CartesianView(flet.Container):
                     flet.Row([
                         self._create_axis_control(name1, code1), 
                         self._create_axis_control(name2, code2)
-                    ], spacing=5, expand=True)
+                    ], spacing=3, expand=True)
                 )
 
         # Grippers Row
-        gripper_row = flet.Row(spacing=5, expand=True)
+        gripper_row = flet.Row(spacing=3, expand=True)
         gripper_row.controls.append(self._create_gripper_control("Electric Gripper"))
         gripper_row.controls.append(self._create_gripper_control("Pneumatic Gripper"))
         controls_column.controls.append(gripper_row)
@@ -286,75 +286,69 @@ class CartesianView(flet.Container):
         # 2. CENTER COLUMN: TOOLS & VELOCITY (MATCHING JOG.PY)
         # ----------------------------------------------------------------------
         # Velocity Panel
-        self.lbl_speed = flet.Text(f"{int(self.jog_speed_percent)}%", size=24, weight="bold", color="cyan")
+        self.lbl_speed = flet.Text(f"{int(self.jog_speed_percent)}%", size=20, weight="bold", color="cyan")
         speed_panel = flet.Container(
             content=flet.Column([
-                flet.Text("VELOCITY", size=14, color="grey", weight="bold"),
+                flet.Text("VELOCITY", size=12, color="grey", weight="bold"),
                 flet.Row([
                     flet.IconButton(flet.Icons.REMOVE, icon_color="white", bgcolor="#444", 
-                                    on_click=lambda e: self.change_speed(-10), icon_size=24),
+                                    on_click=lambda e: self.change_speed(-10), icon_size=20),
                     flet.Container(content=self.lbl_speed, alignment=flet.alignment.center, 
-                                   width=80, bgcolor="#222", border_radius=5, padding=5),
+                                   width=60, bgcolor="#222", border_radius=5, padding=3),
                     flet.IconButton(flet.Icons.ADD, icon_color="white", bgcolor="#444", 
-                                    on_click=lambda e: self.change_speed(10), icon_size=24)
-                ], alignment="center", spacing=10)
-            ], horizontal_alignment="center", spacing=5),
-            bgcolor="#2D2D2D", border_radius=10, border=flet.border.all(1, "#555555"), padding=10
+                                    on_click=lambda e: self.change_speed(10), icon_size=20)
+                ], alignment="center", spacing=5)
+            ], horizontal_alignment="center", spacing=3),
+            bgcolor="#2D2D2D", border_radius=8, border=flet.border.all(1, "#555555"), padding=5
         )
 
-        TOOL_BTN_H = 40
+        TOOL_BTN_H = 35
         tools_column = flet.Column([
             speed_panel, 
-            flet.Container(height=5),
-            flet.ElevatedButton("HOME", icon=flet.Icons.HOME, style=flet.ButtonStyle(bgcolor=flet.Colors.BLUE_GREY_700, color="white", shape=flet.RoundedRectangleBorder(radius=8)), on_click=self.on_home_click, expand=True, width=10000),
-            flet.ElevatedButton("SAFETY", icon=flet.Icons.SHIELD, style=flet.ButtonStyle(bgcolor=flet.Colors.TEAL_700, color="white", shape=flet.RoundedRectangleBorder(radius=8)), on_click=self.on_safety_click, expand=True, width=10000),
-            flet.ElevatedButton("GRIPPER CHANGE", icon=flet.Icons.HANDYMAN, style=flet.ButtonStyle(bgcolor=flet.Colors.PURPLE_700, color="white", shape=flet.RoundedRectangleBorder(radius=8)), on_click=self.on_change_tool_click, expand=True, width=10000),
-            flet.ElevatedButton("STOP", icon=flet.Icons.STOP_CIRCLE, style=flet.ButtonStyle(bgcolor=flet.Colors.RED_700, color="white", shape=flet.RoundedRectangleBorder(radius=8)), on_click=self.on_stop_click, expand=True, width=10000),
-            flet.ElevatedButton("STANDBY", icon=flet.Icons.ACCESSIBILITY, style=flet.ButtonStyle(bgcolor=flet.Colors.ORANGE_900, color="white", shape=flet.RoundedRectangleBorder(radius=8)), on_click=self.on_standby_click, expand=True, width=10000),
-            # Spacer removed to allow buttons to fill space
-            # ERROR RESET moved to Errors tab
-        ], spacing=5, expand=True)
+            flet.Container(height=3),
+            flet.ElevatedButton("HOME", icon=flet.Icons.HOME, style=flet.ButtonStyle(bgcolor=flet.Colors.BLUE_GREY_700, color="white", shape=flet.RoundedRectangleBorder(radius=6)), on_click=self.on_home_click, expand=True, width=10000),
+            flet.ElevatedButton("SAFETY", icon=flet.Icons.SHIELD, style=flet.ButtonStyle(bgcolor=flet.Colors.TEAL_700, color="white", shape=flet.RoundedRectangleBorder(radius=6)), on_click=self.on_safety_click, expand=True, width=10000),
+            flet.ElevatedButton("GRIPPER CHANGE", icon=flet.Icons.HANDYMAN, style=flet.ButtonStyle(bgcolor=flet.Colors.PURPLE_700, color="white", shape=flet.RoundedRectangleBorder(radius=6)), on_click=self.on_change_tool_click, expand=True, width=10000),
+            flet.ElevatedButton("STOP", icon=flet.Icons.STOP_CIRCLE, style=flet.ButtonStyle(bgcolor=flet.Colors.RED_700, color="white", shape=flet.RoundedRectangleBorder(radius=6)), on_click=self.on_stop_click, expand=True, width=10000),
+            flet.ElevatedButton("STANDBY", icon=flet.Icons.ACCESSIBILITY, style=flet.ButtonStyle(bgcolor=flet.Colors.ORANGE_900, color="white", shape=flet.RoundedRectangleBorder(radius=6)), on_click=self.on_standby_click, expand=True, width=10000),
+        ], spacing=3, expand=True)
 
-        tools_container = flet.Container(content=tools_column, expand=5, padding=flet.padding.symmetric(horizontal=5))
+        tools_container = flet.Container(content=tools_column, expand=5, padding=flet.padding.symmetric(horizontal=3))
 
-        # ----------------------------------------------------------------------
         # 3. RIGHT COLUMN: POSITIONS (READOUT)
-        # ----------------------------------------------------------------------
-        pos_list = flet.Column(spacing=8, horizontal_alignment="stretch")
-        pos_list.controls.append(flet.Text("POSITION", size=16, weight="bold", color="white", text_align="center"))
+        pos_list = flet.Column(spacing=5, horizontal_alignment="stretch")
+        pos_list.controls.append(flet.Text("POSITION", size=14, weight="bold", color="white", text_align="center"))
         
         self.lbl_cart = {}
         
         # Joints
         self.lbl_joints = []
         for i in range(self.ik.n_active_joints):
-            lbl = flet.Text("0.00°", size=15, color="cyan", weight="bold")
+            lbl = flet.Text("0.00°", size=12, color="cyan", weight="bold")
             self.lbl_joints.append(lbl)
             pos_list.controls.append(
-                flet.Row([flet.Text(f"J{i+1}:", weight="bold"), lbl], alignment="spaceBetween")
+                flet.Row([flet.Text(f"J{i+1}:", weight="bold", size=12), lbl], alignment="spaceBetween")
             )
             
-        pos_list.controls.append(flet.Divider(height=10, color="#555"))
+        pos_list.controls.append(flet.Divider(height=8, color="#555"))
         
         # TCP
         for ax in ["X", "Y", "Z", "A", "B", "C"]:
             col = "cyan" if ax in ["X", "Y", "Z"] else "orange"
             unit = "mm" if ax in ["X", "Y", "Z"] else "°"
             
-            lbl = flet.Text(f"0.00 {unit}", size=15, color=col, weight="bold")
+            lbl = flet.Text(f"0.00 {unit}", size=12, color=col, weight="bold")
             self.lbl_cart[ax] = lbl
             pos_list.controls.append(
-                flet.Row([flet.Text(f"{ax}:", weight="bold"), lbl], alignment="spaceBetween")
+                flet.Row([flet.Text(f"{ax}:", weight="bold", size=12), lbl], alignment="spaceBetween")
             )
 
         position_frame = flet.Container(content=pos_list, **panel_style, expand=4)
 
-        # ----------------------------------------------------------------------
         # MAIN LAYOUT
-        # ----------------------------------------------------------------------
         self.content = flet.Row(
             [controls_container, tools_container, position_frame], 
-            spacing=10, 
+            spacing=5, 
             vertical_alignment=flet.CrossAxisAlignment.STRETCH
         )
 
@@ -639,11 +633,11 @@ class CartesianView(flet.Container):
         # Create clickable tool panels
         panel_style = {
             "bgcolor": "#3D3D3D",
-            "border_radius": 10,
+            "border_radius": 8,
             "border": flet.border.all(2, "#555555"),
-            "padding": 10,
-            "width": 220,
-            "height": 210,
+            "padding": 8,
+            "width": 180,
+            "height": 170,
             "alignment": flet.alignment.center,
         }
         
@@ -661,18 +655,18 @@ class CartesianView(flet.Container):
         
         vacuum_panel = flet.Container(
             content=flet.Column([
-                flet.Image(src="Gripper1.png", height=160, fit=flet.ImageFit.CONTAIN),
-                flet.Text("Vacuum Gripper", size=15, weight="bold", color="white", text_align=flet.TextAlign.CENTER)
-            ], horizontal_alignment=flet.CrossAxisAlignment.CENTER, spacing=8),
+                flet.Image(src="Gripper1.png", height=120, fit=flet.ImageFit.CONTAIN),
+                flet.Text("Vacuum Gripper", size=13, weight="bold", color="white", text_align=flet.TextAlign.CENTER)
+            ], horizontal_alignment=flet.CrossAxisAlignment.CENTER, spacing=5),
             **panel_style
         )
         make_hover_effect(vacuum_panel, select_vacuum)
         
         electric_panel = flet.Container(
             content=flet.Column([
-                flet.Image(src="Gripper2.png", height=160, fit=flet.ImageFit.CONTAIN),
-                flet.Text("Electric Gripper", size=15, weight="bold", color="white", text_align=flet.TextAlign.CENTER)
-            ], horizontal_alignment=flet.CrossAxisAlignment.CENTER, spacing=8),
+                flet.Image(src="Gripper2.png", height=120, fit=flet.ImageFit.CONTAIN),
+                flet.Text("Electric Gripper", size=13, weight="bold", color="white", text_align=flet.TextAlign.CENTER)
+            ], horizontal_alignment=flet.CrossAxisAlignment.CENTER, spacing=5),
             **panel_style
         )
         make_hover_effect(electric_panel, select_electric)
@@ -680,7 +674,7 @@ class CartesianView(flet.Container):
         tools_row = flet.Row([
             vacuum_panel,
             electric_panel
-        ], spacing=30, alignment=flet.MainAxisAlignment.CENTER)
+        ], spacing=20, alignment=flet.MainAxisAlignment.CENTER)
         
         def on_change_click(e):
             if self.uart: self.uart.send_message("TOOL_CHANGE")
@@ -694,28 +688,28 @@ class CartesianView(flet.Container):
             style=flet.ButtonStyle(
                 bgcolor=flet.Colors.ORANGE_700,
                 color="white",
-                shape=flet.RoundedRectangleBorder(radius=10)
+                shape=flet.RoundedRectangleBorder(radius=8)
             ),
-            height=60,
-            width=300,
+            height=45,
+            width=250,
             on_click=on_change_click
         )
         
         dialog_content = flet.Column([
             tools_row,
-            flet.Container(height=40),
+            flet.Container(height=15),
             flet.Container(content=change_button, alignment=flet.alignment.center)
         ], horizontal_alignment=flet.CrossAxisAlignment.CENTER, spacing=0)
         
         title_row = flet.Row([
-            flet.Text("CHANGE ACTIVE TOOL", size=22, weight="bold", color="white"),
-            flet.IconButton(icon=flet.Icons.CLOSE, icon_size=28, on_click=close_dlg)
+            flet.Text("CHANGE ACTIVE TOOL", size=18, weight="bold", color="white"),
+            flet.IconButton(icon=flet.Icons.CLOSE, icon_size=24, on_click=close_dlg)
         ], alignment=flet.MainAxisAlignment.SPACE_BETWEEN)
         
         self.tool_change_dialog = flet.AlertDialog(
             title=title_row,
-            title_padding=flet.padding.only(left=20, right=10, top=10, bottom=0),
-            content=flet.Container(content=dialog_content, padding=10, width=520, height=310),
+            title_padding=flet.padding.only(left=15, right=8, top=8, bottom=0),
+            content=flet.Container(content=dialog_content, padding=8, width=420, height=250),
             modal=True,
             bgcolor="#2D2D2D"
         )
@@ -899,9 +893,9 @@ class CartesianView(flet.Container):
     def _create_gripper_control(self, display_name: str) -> flet.Container:
         container_style = {
             "bgcolor": "#2D2D2D", 
-            "border_radius": 8, 
+            "border_radius": 6, 
             "border": flet.border.all(1, "#555555"), 
-            "padding": 5, 
+            "padding": 3, 
             "expand": True
         }
         g_type = "electric" if "electric" in display_name.lower() else "pneumatic"
@@ -911,16 +905,16 @@ class CartesianView(flet.Container):
         color = flet.Colors.GREEN_600 if state else flet.Colors.RED_600
         
         btn = flet.ElevatedButton(
-            content=flet.Text(txt, size=14), 
+            content=flet.Text(txt, size=12), 
             style=flet.ButtonStyle(bgcolor=color), 
             on_click=self.on_gripper_toggle_click, 
             data=g_type, 
-            height=50, 
+            height=40, 
             expand=True
         )
         return flet.Container(
             content=flet.Column([
-                flet.Text(display_name, size=13, color="white", text_align="center"), 
+                flet.Text(display_name, size=11, color="white", text_align="center"), 
                 flet.Row([btn], expand=True)
             ], spacing=2), 
             **container_style
@@ -929,19 +923,19 @@ class CartesianView(flet.Container):
     def _create_axis_control(self, display_name: str, code: str) -> flet.Container:
         container_style = {
             "bgcolor": "#2D2D2D", 
-            "border_radius": 8, 
+            "border_radius": 6, 
             "border": flet.border.all(1, "#555555"), 
-            "padding": 5, 
+            "padding": 3, 
             "expand": True
         }
 
         def mk_btn(txt, direction):
             c = flet.Container(
-                content=flet.Text(txt, size=30, weight="bold", color="white"), 
+                content=flet.Text(txt, size=24, weight="bold", color="white"), 
                 bgcolor="#444444", 
-                border_radius=8, 
+                border_radius=6, 
                 alignment=flet.alignment.center, 
-                height=65, 
+                height=50, 
                 shadow=flet.BoxShadow(blur_radius=2, color="black"), 
                 border=flet.border.all(1, "#666")
             )
@@ -956,11 +950,11 @@ class CartesianView(flet.Container):
 
         return flet.Container(
             content=flet.Column([
-                flet.Text(display_name, size=14, weight="bold", color="white", text_align="center"), 
+                flet.Text(display_name, size=12, weight="bold", color="white", text_align="center"), 
                 flet.Row([
                     mk_btn("-", "minus"), 
                     mk_btn("+", "plus")
-                ], spacing=5, expand=True)
+                ], spacing=3, expand=True)
             ], spacing=2), 
             **container_style
         )

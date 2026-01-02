@@ -50,60 +50,58 @@ class JogView(flet.Container):
             "J4": (-100, 180), "J5": (-120, 110), "J6": (-110, 180) 
         }
 
-        self.padding = 10 
+        self.padding = 5 
         self.motors_list = ["Motor 1 (J1)", "Motor 2 (J2)", "Motor 3 (J3)", "Motor 4 (J4)", "Motor 5 (J5)", "Motor 6 (J6)"]
         self.grippers_list = ["Electric Gripper", "Pneumatic Gripper"]
         self._setup_ui()
 
     def _setup_ui(self):
-        panel_style = {"bgcolor": "#2D2D2D", "border_radius": 10, "border": flet.border.all(1, "#555555"), "padding": 10}
+        panel_style = {"bgcolor": "#2D2D2D", "border_radius": 8, "border": flet.border.all(1, "#555555"), "padding": 5}
 
-        motors_column = flet.Column(spacing=5, expand=True)
+        motors_column = flet.Column(spacing=3, expand=True)
         for i in range(0, len(self.motors_list), 2):
             if i+1 < len(self.motors_list):
                 panel1 = self._create_joint_control(self.motors_list[i])
                 panel2 = self._create_joint_control(self.motors_list[i+1])
-                motors_column.controls.append(flet.Row(controls=[panel1, panel2], spacing=5, expand=True))
+                motors_column.controls.append(flet.Row(controls=[panel1, panel2], spacing=3, expand=True))
 
-        gripper_row = flet.Row(spacing=5, expand=True)
+        gripper_row = flet.Row(spacing=3, expand=True)
         for g_name in self.grippers_list:
             gripper_row.controls.append(self._create_joint_control(g_name))
         motors_column.controls.append(gripper_row)
         motors_container = flet.Container(content=motors_column, expand=20)
         
-        self.lbl_speed = flet.Text(f"{self.speed_percent}%", size=24, weight="bold", color="cyan")
+        self.lbl_speed = flet.Text(f"{self.speed_percent}%", size=20, weight="bold", color="cyan")
         speed_panel = flet.Container(
             content=flet.Column([
-                flet.Text("VELOCITY", size=14, color="grey", weight="bold"),
+                flet.Text("VELOCITY", size=12, color="grey", weight="bold"),
                 flet.Row([
-                    flet.IconButton(flet.Icons.REMOVE, icon_color="white", bgcolor="#444", on_click=lambda e: self.change_speed(-10), icon_size=24),
-                    flet.Container(content=self.lbl_speed, alignment=flet.alignment.center, width=80, bgcolor="#222", border_radius=5, padding=5),
-                    flet.IconButton(flet.Icons.ADD, icon_color="white", bgcolor="#444", on_click=lambda e: self.change_speed(10), icon_size=24)
-                ], alignment="center", spacing=10)
-            ], horizontal_alignment="center", spacing=5),
-            bgcolor="#2D2D2D", border_radius=10, border=flet.border.all(1, "#555555"), padding=10
+                    flet.IconButton(flet.Icons.REMOVE, icon_color="white", bgcolor="#444", on_click=lambda e: self.change_speed(-10), icon_size=20),
+                    flet.Container(content=self.lbl_speed, alignment=flet.alignment.center, width=60, bgcolor="#222", border_radius=5, padding=3),
+                    flet.IconButton(flet.Icons.ADD, icon_color="white", bgcolor="#444", on_click=lambda e: self.change_speed(10), icon_size=20)
+                ], alignment="center", spacing=5)
+            ], horizontal_alignment="center", spacing=3),
+            bgcolor="#2D2D2D", border_radius=8, border=flet.border.all(1, "#555555"), padding=5
         )
 
-        TOOL_BTN_H = 40 
+        TOOL_BTN_H = 35 
         tools_column = flet.Column([
-            speed_panel, flet.Container(height=5),
-            flet.ElevatedButton("HOME", icon=flet.Icons.HOME, style=flet.ButtonStyle(bgcolor=flet.Colors.BLUE_GREY_700, color="white", shape=flet.RoundedRectangleBorder(radius=8)), on_click=self.on_home_click, expand=True, width=10000),
-            flet.ElevatedButton("SAFETY", icon=flet.Icons.SHIELD, style=flet.ButtonStyle(bgcolor=flet.Colors.TEAL_700, color="white", shape=flet.RoundedRectangleBorder(radius=8)), on_click=self.on_safety_click, expand=True, width=10000),
-            flet.ElevatedButton("GRIPPER CHANGE", icon=flet.Icons.HANDYMAN, style=flet.ButtonStyle(bgcolor=flet.Colors.PURPLE_700, color="white", shape=flet.RoundedRectangleBorder(radius=8)), on_click=self.on_change_tool_click, expand=True, width=10000),
-            flet.ElevatedButton("STOP", icon=flet.Icons.STOP_CIRCLE, style=flet.ButtonStyle(bgcolor=flet.Colors.RED_700, color="white", shape=flet.RoundedRectangleBorder(radius=8)), on_click=self.on_stop_click, expand=True, width=10000),
-            flet.ElevatedButton("STANDBY", icon=flet.Icons.ACCESSIBILITY, style=flet.ButtonStyle(bgcolor=flet.Colors.ORANGE_900, color="white", shape=flet.RoundedRectangleBorder(radius=8)), on_click=self.on_standby_click, expand=True, width=10000),
-            # Spacer removed to allow buttons to fill space
-            # ERROR RESET moved to Errors tab
-        ], spacing=5, expand=True)
-        tools_container = flet.Container(content=tools_column, expand=5, padding=flet.padding.symmetric(horizontal=5))
+            speed_panel, flet.Container(height=3),
+            flet.ElevatedButton("HOME", icon=flet.Icons.HOME, style=flet.ButtonStyle(bgcolor=flet.Colors.BLUE_GREY_700, color="white", shape=flet.RoundedRectangleBorder(radius=6)), on_click=self.on_home_click, expand=True, width=10000),
+            flet.ElevatedButton("SAFETY", icon=flet.Icons.SHIELD, style=flet.ButtonStyle(bgcolor=flet.Colors.TEAL_700, color="white", shape=flet.RoundedRectangleBorder(radius=6)), on_click=self.on_safety_click, expand=True, width=10000),
+            flet.ElevatedButton("GRIPPER CHANGE", icon=flet.Icons.HANDYMAN, style=flet.ButtonStyle(bgcolor=flet.Colors.PURPLE_700, color="white", shape=flet.RoundedRectangleBorder(radius=6)), on_click=self.on_change_tool_click, expand=True, width=10000),
+            flet.ElevatedButton("STOP", icon=flet.Icons.STOP_CIRCLE, style=flet.ButtonStyle(bgcolor=flet.Colors.RED_700, color="white", shape=flet.RoundedRectangleBorder(radius=6)), on_click=self.on_stop_click, expand=True, width=10000),
+            flet.ElevatedButton("STANDBY", icon=flet.Icons.ACCESSIBILITY, style=flet.ButtonStyle(bgcolor=flet.Colors.ORANGE_900, color="white", shape=flet.RoundedRectangleBorder(radius=6)), on_click=self.on_standby_click, expand=True, width=10000),
+        ], spacing=3, expand=True)
+        tools_container = flet.Container(content=tools_column, expand=5, padding=flet.padding.symmetric(horizontal=3))
 
-        pos_list = flet.Column(spacing=8, horizontal_alignment="stretch")
-        pos_list.controls.append(flet.Text("POSITION", size=16, weight="bold", color="white", text_align="center"))
+        pos_list = flet.Column(spacing=5, horizontal_alignment="stretch")
+        pos_list.controls.append(flet.Text("POSITION", size=14, weight="bold", color="white", text_align="center"))
         self.position_value_labels = {} 
         for name in ["J1", "J2", "J3", "J4", "J5", "J6"]:
-            lbl = flet.Text("0.00°", size=15, color="cyan", weight="bold")
+            lbl = flet.Text("0.00°", size=12, color="cyan", weight="bold")
             self.position_value_labels[name] = lbl
-            pos_list.controls.append(flet.Row([flet.Text(f"{name}:", weight="bold"), lbl], alignment="spaceBetween"))
+            pos_list.controls.append(flet.Row([flet.Text(f"{name}:", weight="bold", size=12), lbl], alignment="spaceBetween"))
         
         pos_list.controls.append(flet.Divider(height=10, color="#555"))
         
@@ -111,12 +109,12 @@ class JogView(flet.Container):
         for name in ["X", "Y", "Z", "A", "B", "C"]:
             col = "cyan" if name in ["X", "Y", "Z"] else "orange"
             unit = "mm" if name in ["X", "Y", "Z"] else "°"
-            lbl = flet.Text(f"0.00 {unit}", size=15, color=col, weight="bold")
+            lbl = flet.Text(f"0.00 {unit}", size=12, color=col, weight="bold")
             self.tcp_labels[name] = lbl
-            pos_list.controls.append(flet.Row([flet.Text(f"{name}:", weight="bold"), lbl], alignment="spaceBetween"))
+            pos_list.controls.append(flet.Row([flet.Text(f"{name}:", weight="bold", size=12), lbl], alignment="spaceBetween"))
 
         position_frame = flet.Container(content=pos_list, **panel_style, expand=4)
-        self.content = flet.Row([motors_container, tools_container, position_frame], spacing=10, vertical_alignment=flet.CrossAxisAlignment.STRETCH)
+        self.content = flet.Row([motors_container, tools_container, position_frame], spacing=5, vertical_alignment=flet.CrossAxisAlignment.STRETCH)
 
     # --- LIFECYCLE METHODS ---
     def did_mount(self):
@@ -374,11 +372,11 @@ class JogView(flet.Container):
         # Create clickable tool panels
         panel_style = {
             "bgcolor": "#3D3D3D",
-            "border_radius": 10,
+            "border_radius": 8,
             "border": flet.border.all(2, "#555555"),
-            "padding": 10,
-            "width": 220,
-            "height": 210,
+            "padding": 8,
+            "width": 180,
+            "height": 170,
             "alignment": flet.alignment.center,
         }
         
@@ -396,18 +394,18 @@ class JogView(flet.Container):
         
         vacuum_panel = flet.Container(
             content=flet.Column([
-                flet.Image(src="Gripper1.png", height=160, fit=flet.ImageFit.CONTAIN),
-                flet.Text("Vacuum Gripper", size=15, weight="bold", color="white", text_align=flet.TextAlign.CENTER)
-            ], horizontal_alignment=flet.CrossAxisAlignment.CENTER, spacing=8),
+                flet.Image(src="Gripper1.png", height=120, fit=flet.ImageFit.CONTAIN),
+                flet.Text("Vacuum Gripper", size=13, weight="bold", color="white", text_align=flet.TextAlign.CENTER)
+            ], horizontal_alignment=flet.CrossAxisAlignment.CENTER, spacing=5),
             **panel_style
         )
         make_hover_effect(vacuum_panel, select_vacuum)
         
         electric_panel = flet.Container(
             content=flet.Column([
-                flet.Image(src="Gripper2.png", height=160, fit=flet.ImageFit.CONTAIN),
-                flet.Text("Electric Gripper", size=15, weight="bold", color="white", text_align=flet.TextAlign.CENTER)
-            ], horizontal_alignment=flet.CrossAxisAlignment.CENTER, spacing=8),
+                flet.Image(src="Gripper2.png", height=120, fit=flet.ImageFit.CONTAIN),
+                flet.Text("Electric Gripper", size=13, weight="bold", color="white", text_align=flet.TextAlign.CENTER)
+            ], horizontal_alignment=flet.CrossAxisAlignment.CENTER, spacing=5),
             **panel_style
         )
         make_hover_effect(electric_panel, select_electric)
@@ -415,7 +413,7 @@ class JogView(flet.Container):
         tools_row = flet.Row([
             vacuum_panel,
             electric_panel
-        ], spacing=30, alignment=flet.MainAxisAlignment.CENTER)
+        ], spacing=20, alignment=flet.MainAxisAlignment.CENTER)
         
         def on_change_click(e):
             if self.uart: self.uart.send_message("TOOL_CHANGE")
@@ -429,28 +427,28 @@ class JogView(flet.Container):
             style=flet.ButtonStyle(
                 bgcolor=flet.Colors.ORANGE_700,
                 color="white",
-                shape=flet.RoundedRectangleBorder(radius=10)
+                shape=flet.RoundedRectangleBorder(radius=8)
             ),
-            height=60,
-            width=300,
+            height=45,
+            width=250,
             on_click=on_change_click
         )
         
         dialog_content = flet.Column([
             tools_row,
-            flet.Container(height=40),
+            flet.Container(height=15),
             flet.Container(content=change_button, alignment=flet.alignment.center)
         ], horizontal_alignment=flet.CrossAxisAlignment.CENTER, spacing=0)
         
         title_row = flet.Row([
-            flet.Text("CHANGE ACTIVE TOOL", size=22, weight="bold", color="white"),
-            flet.IconButton(icon=flet.Icons.CLOSE, icon_size=28, on_click=close_dlg)
+            flet.Text("CHANGE ACTIVE TOOL", size=18, weight="bold", color="white"),
+            flet.IconButton(icon=flet.Icons.CLOSE, icon_size=24, on_click=close_dlg)
         ], alignment=flet.MainAxisAlignment.SPACE_BETWEEN)
         
         self.tool_change_dialog = flet.AlertDialog(
             title=title_row,
-            title_padding=flet.padding.only(left=20, right=10, top=10, bottom=0),
-            content=flet.Container(content=dialog_content, padding=10, width=520, height=310),
+            title_padding=flet.padding.only(left=15, right=8, top=8, bottom=0),
+            content=flet.Container(content=dialog_content, padding=8, width=420, height=250),
             modal=True,
             bgcolor="#2D2D2D"
         )
@@ -525,21 +523,21 @@ class JogView(flet.Container):
         if self.uart: self.uart.send_message(cmd)
 
     def _create_joint_control(self, display_name: str) -> flet.Container:
-        container_style = {"bgcolor": "#2D2D2D", "border_radius": 8, "border": flet.border.all(1, "#555555"), "padding": 5, "expand": True}
+        container_style = {"bgcolor": "#2D2D2D", "border_radius": 6, "border": flet.border.all(1, "#555555"), "padding": 3, "expand": True}
         if "gripper" in display_name.lower():
             g_type = "electric" if "electric" in display_name.lower() else "pneumatic"
             state = self.gripper_states[g_type]
             txt = "CLOSED" if state and g_type=="electric" else ("OPEN" if g_type=="electric" else ("ON" if state else "OFF"))
-            btn = flet.ElevatedButton(content=flet.Text(txt, size=14), style=flet.ButtonStyle(bgcolor=flet.Colors.GREEN_600 if state else flet.Colors.RED_600), on_click=self.on_gripper_toggle_click, data=g_type, height=50, expand=True)
-            return flet.Container(content=flet.Column([flet.Text(display_name, size=13, color="white", text_align="center"), flet.Row([btn], expand=True)], spacing=2), **container_style)
+            btn = flet.ElevatedButton(content=flet.Text(txt, size=12), style=flet.ButtonStyle(bgcolor=flet.Colors.GREEN_600 if state else flet.Colors.RED_600), on_click=self.on_gripper_toggle_click, data=g_type, height=40, expand=True)
+            return flet.Container(content=flet.Column([flet.Text(display_name, size=11, color="white", text_align="center"), flet.Row([btn], expand=True)], spacing=2), **container_style)
         else:
             joint_code = "UNK"
             if "(" in display_name: joint_code = display_name.split("(")[1].split(")")[0]
             def mk_btn(txt, d, code):
-                c = flet.Container(content=flet.Text(txt, size=30, weight="bold", color="white"), bgcolor="#444444", border_radius=8, alignment=flet.alignment.center, height=65, shadow=flet.BoxShadow(blur_radius=2, color="black"), border=flet.border.all(1, "#666"))
+                c = flet.Container(content=flet.Text(txt, size=24, weight="bold", color="white"), bgcolor="#444444", border_radius=6, alignment=flet.alignment.center, height=50, shadow=flet.BoxShadow(blur_radius=2, color="black"), border=flet.border.all(1, "#666"))
                 gest = flet.GestureDetector(content=c, on_tap_down=lambda e: self.on_jog_start(e, code, d, gest), on_tap_up=lambda e: self.on_jog_stop(e, code, d, gest), on_long_press_end=lambda e: self.on_jog_stop(e, code, d, gest), on_pan_end=lambda e: self.on_jog_stop(e, code, d, gest))
                 return flet.Container(content=gest, expand=True)
-            return flet.Container(content=flet.Column([flet.Text(display_name, size=14, weight="bold", color="white", text_align="center"), flet.Row([mk_btn("-", "minus", joint_code), mk_btn("+", "plus", joint_code)], spacing=5, expand=True)], spacing=2), **container_style)
+            return flet.Container(content=flet.Column([flet.Text(display_name, size=12, weight="bold", color="white", text_align="center"), flet.Row([mk_btn("-", "minus", joint_code), mk_btn("+", "plus", joint_code)], spacing=3, expand=True)], spacing=2), **container_style)
 
     def _calculate_forward_kinematics(self):
         """

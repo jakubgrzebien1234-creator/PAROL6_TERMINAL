@@ -10,7 +10,7 @@ class StatusView(flet.Container):
 
         # --- MAIN SETTINGS ---
         self.expand = True
-        self.padding = 5
+        self.padding = 3
         self.bgcolor = "#2D2D2D"
         
         self.value_controls = {}
@@ -46,7 +46,7 @@ class StatusView(flet.Container):
                 self._create_status_row("Port", "--", color=Colors.BLUE_400, key="PORT_NAME"),
             ],
             scroll=ScrollMode.ADAPTIVE,
-            spacing=5,
+            spacing=3,
             expand=True
         )
 
@@ -74,15 +74,15 @@ class StatusView(flet.Container):
                 self._create_status_row("Motor 6 Connected", "True", color=Colors.GREEN_400, key="M6_CONN"),
             ],
             scroll=ScrollMode.ADAPTIVE,
-            spacing=5,
+            spacing=3,
             expand=True
         )
 
         # Frame styles
         frame_style = {
             "bgcolor": "#2D2D2D",
-            "border_radius": 10,
-            "padding": 15,
+            "border_radius": 8,
+            "padding": 8,
             "border": flet.border.all(1, "#444444"),
             "expand": True,
         }
@@ -93,7 +93,7 @@ class StatusView(flet.Container):
                 Container(content=self.left_column_content, **frame_style),
                 Container(content=self.right_column_content, **frame_style)
             ],
-            spacing=5,
+            spacing=3,
             expand=True,
             vertical_alignment=flet.CrossAxisAlignment.STRETCH
         )
@@ -121,8 +121,8 @@ class StatusView(flet.Container):
     # ======================================================================
     def _create_header(self, text):
         return Container(
-            content=Text(text, color=Colors.BLUE_GREY_200, weight="bold", size=14),
-            padding=padding.only(top=10, bottom=5)
+            content=Text(text, color=Colors.BLUE_GREY_200, weight="bold", size=12),
+            padding=padding.only(top=6, bottom=3)
         )
 
     def _create_status_row(self, label_text, start_value, color="white", key=None):
@@ -130,7 +130,7 @@ class StatusView(flet.Container):
             value=start_value,
             color=color,
             weight="bold",
-            size=16,
+            size=13,
             text_align=flet.TextAlign.CENTER
         )
         
@@ -142,15 +142,15 @@ class StatusView(flet.Container):
             content=value_display,
             bgcolor=Colors.BLUE_GREY_900,
             border=border.all(1, Colors.BLUE_GREY_700),
-            border_radius=6,
-            padding=padding.symmetric(horizontal=5, vertical=5),
-            width=130, 
+            border_radius=5,
+            padding=padding.symmetric(horizontal=4, vertical=3),
+            width=110, 
             alignment=alignment.center
         )
 
         row = Row(
             controls=[
-                Text(label_text, color="white", size=16, expand=True),
+                Text(label_text, color="white", size=13, expand=True),
                 value_box
             ],
             alignment=MainAxisAlignment.SPACE_BETWEEN,
@@ -158,6 +158,6 @@ class StatusView(flet.Container):
 
         return Container(
             content=row,
-            padding=padding.symmetric(vertical=3),
+            padding=padding.symmetric(vertical=2),
             border=border.only(bottom=border.BorderSide(1, "#444444"))
         )

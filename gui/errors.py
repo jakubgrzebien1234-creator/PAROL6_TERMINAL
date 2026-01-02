@@ -80,14 +80,14 @@ class ErrorsView(flet.Container):
         
         # --- MAIN SETTINGS ---
         self.expand = True
-        self.padding = 5
+        self.padding = 3
         self.bgcolor = "#2D2D2D" 
         
         # ======================================================================
         # === 1. STATUS HEADER (Monitor) ===
         # ======================================================================
-        self.status_icon = Icon(name=Icons.CHECK_CIRCLE, size=40, color=Colors.GREEN_400)
-        self.status_text = Text("SYSTEM OK", size=20, weight="bold", color=Colors.GREEN_400)
+        self.status_icon = Icon(name=Icons.CHECK_CIRCLE, size=30, color=Colors.GREEN_400)
+        self.status_text = Text("SYSTEM OK", size=16, weight="bold", color=Colors.GREEN_400)
         
         self.header_panel = Container(
             content=Row(
@@ -95,22 +95,22 @@ class ErrorsView(flet.Container):
                 alignment=flet.MainAxisAlignment.CENTER,
             ),
             bgcolor="#2D2D2D",
-            border_radius=10,
+            border_radius=8,
             border=border.all(1, Colors.GREEN_900),
-            padding=15,
+            padding=10,
         )
 
         # ======================================================================
         # === 2. LOG LIST (Scrollable) ===
         # ======================================================================
         self.logs_list_view = ListView(
-            expand=True, spacing=5, padding=10, auto_scroll=True
+            expand=True, spacing=3, padding=5, auto_scroll=True
         )
 
         logs_container = Container(
             content=self.logs_list_view,
             bgcolor="#2D2D2D",
-            border_radius=10,
+            border_radius=8,
             border=border.all(1, "#444444"),
             expand=True, 
         )
@@ -150,12 +150,12 @@ class ErrorsView(flet.Container):
         self.content = Column(
             controls=[
                 self.header_panel,
-                Text("Event Log:", size=14, color=Colors.GREY_500),
+                Text("Event Log:", size=12, color=Colors.GREY_500),
                 logs_container,
                 buttons_row
             ],
             expand=True,
-            spacing=10
+            spacing=5
         )
 
     # ======================================================================
@@ -187,18 +187,18 @@ class ErrorsView(flet.Container):
         log_row = Container(
             content=Row(
                 controls=[
-                    Text(f"[{timestamp}]", color=Colors.GREY_500, size=12, weight="bold"),
-                    Icon(name=icon_name, color=icon_color, size=16),
-                    Text(level, color=icon_color, weight="bold", width=85), 
-                    Text(message, color=text_color, size=14, expand=True, no_wrap=False),
+                    Text(f"[{timestamp}]", color=Colors.GREY_500, size=11, weight="bold"),
+                    Icon(name=icon_name, color=icon_color, size=14),
+                    Text(level, color=icon_color, weight="bold", width=70), 
+                    Text(message, color=text_color, size=12, expand=True, no_wrap=False),
                 ],
                 alignment=flet.MainAxisAlignment.START,
                 vertical_alignment=flet.CrossAxisAlignment.CENTER
             ),
             bgcolor=bg_color,
-            border_radius=5,
-            padding=5,
-            border=border.only(left=border.BorderSide(4, icon_color))
+            border_radius=4,
+            padding=4,
+            border=border.only(left=border.BorderSide(3, icon_color))
         )
 
         # 1. Add entry to list
@@ -328,17 +328,17 @@ class ErrorsView(flet.Container):
             content=Row(
                 controls=[
                     timestamp_text,
-                    Icon(name=icon_name, color=icon_color, size=16),
-                    Text(level, color=icon_color, weight="bold", width=85),
-                    Text(message, color=text_color, size=14, expand=True, no_wrap=False),
+                    Icon(name=icon_name, color=icon_color, size=14),
+                    Text(level, color=icon_color, weight="bold", width=70),
+                    Text(message, color=text_color, size=12, expand=True, no_wrap=False),
                 ],
                 alignment=flet.MainAxisAlignment.START,
                 vertical_alignment=flet.CrossAxisAlignment.CENTER
             ),
             bgcolor=bg_color,
-            border_radius=5,
-            padding=5,
-            border=border.only(left=border.BorderSide(4, icon_color))
+            border_radius=4,
+            padding=4,
+            border=border.only(left=border.BorderSide(3, icon_color))
         )
         
         # Track this alarm

@@ -21,7 +21,7 @@ class SettingsView(flet.Container):
 
     def __init__(self, uart_communicator):
         super().__init__()
-        self.padding = 10
+        self.padding = 5
         self.alignment = alignment.center
         self.comm = uart_communicator
         
@@ -82,7 +82,7 @@ class SettingsView(flet.Container):
         self._load_settings() 
         
         # UI init
-        self.sliders_column_container = Column(controls=[], spacing=10, expand=True, scroll=ScrollMode.ADAPTIVE)
+        self.sliders_column_container = Column(controls=[], spacing=5, expand=True, scroll=ScrollMode.ADAPTIVE)
         self.sliders_labels = []        
         self.slider_controls = []       
         self.slider_value_displays = [] 
@@ -909,15 +909,15 @@ class SettingsView(flet.Container):
         panel4 = self._create_global_settings_panel()
         return Row(controls=[
             Container(content=panel1, expand=2),  # Robot panel (smaller)
-            Container(content=Column([panel2, panel3], spacing=10, expand=True), expand=1),  # Grippers
-            Container(content=Column([panel4], spacing=10, expand=True), expand=1)  # Global Settings
-        ], spacing=10, expand=True)
+            Container(content=Column([panel2, panel3], spacing=5, expand=True), expand=1),  # Grippers
+            Container(content=Column([panel4], spacing=5, expand=True), expand=1)  # Global Settings
+        ], spacing=5, expand=True)
 
     def _create_global_settings_panel(self):
         """Create a clickable panel for Global Settings"""
         panel_style = { 
             "bgcolor": "#2D2D2D", 
-            "border_radius": 10, 
+            "border_radius": 8, 
             "border": flet.border.all(2, "#555555"), 
             "expand": True 
         }
@@ -927,15 +927,15 @@ class SettingsView(flet.Container):
             controls=[
                 # Huge Icon in the center
                 Container(
-                    content=flet.Icon(flet.Icons.SETTINGS, size=140, color=Colors.CYAN_400),
+                    content=flet.Icon(flet.Icons.SETTINGS, size=100, color=Colors.CYAN_400),
                     alignment=alignment.center,
                     expand=True,
                 ),
                 # Text at the bottom
                 Container(
-                    content=Text("GLOBAL SETTINGS", size=20, weight="bold", color="white", text_align=flet.TextAlign.CENTER),
+                    content=Text("GLOBAL SETTINGS", size=16, weight="bold", color="white", text_align=flet.TextAlign.CENTER),
                     alignment=alignment.bottom_center,
-                    padding=flet.padding.only(bottom=15),
+                    padding=flet.padding.only(bottom=10),
                 )
             ],
             expand=True
@@ -959,7 +959,7 @@ class SettingsView(flet.Container):
 
     def _create_detail_view(self, image_name: str):
         self.active_view_name = image_name 
-        podramka_style = { "bgcolor": "#2D2D2D", "border_radius": 10, "border": flet.border.all(1, "#555555"), "padding": 10, "alignment": alignment.center }
+        podramka_style = { "bgcolor": "#2D2D2D", "border_radius": 8, "border": flet.border.all(1, "#555555"), "padding": 5, "alignment": alignment.center }
         podramka_obrazkowa_style = podramka_style.copy()
         podramka_obrazkowa_style.pop("padding", None); podramka_obrazkowa_style.pop("alignment", None); podramka_obrazkowa_style["clip_behavior"] = flet.ClipBehavior.ANTI_ALIAS
         
@@ -968,10 +968,10 @@ class SettingsView(flet.Container):
             btn_ctrls = [ElevatedButton(text=name, expand=True, style=flet.ButtonStyle(bgcolor=Colors.BLUE_GREY_700, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=8)), on_click=lambda e, i=idx: self._on_motor_select(i)) for idx, name in enumerate(self.motor_names, start=1)]
             
             # --- GÓRNE MENU (Kategorie ustawień) ---
-            top_btns = [ElevatedButton(text=name, height=45, expand=True, style=flet.ButtonStyle(bgcolor=Colors.BLUE_GREY_600, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=8)), on_click=lambda e, i=i: self._on_slider_set_select(i)) for i, name in enumerate(["Ramp", "Current", "Home"], start=1)]
+            top_btns = [ElevatedButton(text=name, height=35, expand=True, style=flet.ButtonStyle(bgcolor=Colors.BLUE_GREY_600, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=6)), on_click=lambda e, i=i: self._on_slider_set_select(i)) for i, name in enumerate(["Ramp", "Current", "Home"], start=1)]
             
             # --- PRZYCISK DEFAULT ---
-            default_btn = ElevatedButton(text="DEFAULT", height=45, width=100, style=flet.ButtonStyle(bgcolor=Colors.RED_700, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=8)), on_click=self._restore_default_settings)
+            default_btn = ElevatedButton(text="DEFAULT", height=35, width=80, style=flet.ButtonStyle(bgcolor=Colors.RED_700, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=6)), on_click=self._restore_default_settings)
             
             # --- SKŁADANIE GÓRNEGO PASKA ---
             top_toolbar = Row(
@@ -984,18 +984,18 @@ class SettingsView(flet.Container):
             )
 
             # --- ŚRODEK (Suwaki) ---
-            self.sliders_column_container = Column(controls=[], spacing=10, expand=True, scroll=ScrollMode.ADAPTIVE)
+            self.sliders_column_container = Column(controls=[], spacing=5, expand=True, scroll=ScrollMode.ADAPTIVE)
             self._build_slider_ui(self.slider_set_definitions.get(1, []), self.motor_settings_data.get(1, {}).get(1, []))
             
             # --- PRAWY PANEL ---
-            self.motor_display = Text("Motor: J1", color="white", size=18, weight="bold")
-            send_save_button = ElevatedButton(text="Send & Save", height=40, expand=True, style=flet.ButtonStyle(bgcolor=Colors.GREEN_700, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=8)), on_click=self._on_send_and_save_click)
+            self.motor_display = Text("Motor: J1", color="white", size=14, weight="bold")
+            send_save_button = ElevatedButton(text="Send & Save", height=35, expand=True, style=flet.ButtonStyle(bgcolor=Colors.GREEN_700, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=6)), on_click=self._on_send_and_save_click)
             
             return Row(controls=[
-                Container(content=Column(controls=btn_ctrls, spacing=10, expand=True), **podramka_style, expand=1),
-                Container(content=Column(controls=[Container(content=top_toolbar, **podramka_style), self.sliders_column_container], spacing=10, expand=True), **{**podramka_style, "alignment": alignment.top_center}, expand=7),
-                Column(controls=[Container(content=self.motor_display, **podramka_style, height=50), Container(content=Image(src="stepper60.png", fit=flet.ImageFit.CONTAIN, expand=True), **podramka_obrazkowa_style, expand=1), Row(controls=[send_save_button])], spacing=10, expand=2)
-            ], spacing=10, expand=True)
+                Container(content=Column(controls=btn_ctrls, spacing=5, expand=True), **podramka_style, expand=1),
+                Container(content=Column(controls=[Container(content=top_toolbar, **podramka_style), self.sliders_column_container], spacing=5, expand=True), **{**podramka_style, "alignment": alignment.top_center}, expand=7),
+                Column(controls=[Container(content=self.motor_display, **podramka_style, height=40), Container(content=Image(src="stepper60.png", fit=flet.ImageFit.CONTAIN, expand=True), **podramka_obrazkowa_style, expand=1), Row(controls=[send_save_button])], spacing=5, expand=2)
+            ], spacing=5, expand=True)
 
         elif image_name == "global_settings":
             # --- WIDOK GLOBALNYCH USTAWIEŃ (Touch Panel Friendly - Revised) ---
@@ -1019,11 +1019,11 @@ class SettingsView(flet.Container):
                                on_change=on_change, on_change_end=on_release)
                 
                 return Row(controls=[
-                    Text(label, color=color, size=14, weight="bold", width=30),
+                    Text(label, color=color, size=12, weight="bold", width=25),
                     slider,
-                    Container(content=val_txt, width=50, height=32, bgcolor=Colors.BLUE_GREY_800,
-                             border_radius=5, border=flet.border.all(1, color), alignment=alignment.center)
-                ], spacing=2, height=40)
+                    Container(content=val_txt, width=45, height=28, bgcolor=Colors.BLUE_GREY_800,
+                             border_radius=4, border=flet.border.all(1, color), alignment=alignment.center)
+                ], spacing=2, height=35)
             
             def create_sensor_group(sensor_num):
                 """Create a large sensor group"""
@@ -1032,14 +1032,14 @@ class SettingsView(flet.Container):
                 
                 return Container(
                     content=Column([
-                        Text(f"SENSOR {sensor_num}", size=15, weight="bold", color=Colors.CYAN_400, text_align=flet.TextAlign.CENTER),
+                        Text(f"SENSOR {sensor_num}", size=12, weight="bold", color=Colors.CYAN_400, text_align=flet.TextAlign.CENTER),
                         ot_slider,
                         ct_slider,
                     ], spacing=2, horizontal_alignment=flet.CrossAxisAlignment.CENTER),
                     bgcolor="#252525",
-                    border_radius=10,
+                    border_radius=8,
                     border=flet.border.all(1, Colors.BLUE_GREY_700),
-                    padding=15,
+                    padding=8,
                     expand=True
                 )
             
@@ -1049,7 +1049,7 @@ class SettingsView(flet.Container):
                 create_sensor_group(2), 
                 create_sensor_group(3), 
                 create_sensor_group(4)
-            ], spacing=15)
+            ], spacing=8)
             
             # Other settings
             other_sliders = []
@@ -1074,48 +1074,48 @@ class SettingsView(flet.Container):
                                active_color=Colors.CYAN_400, expand=True,
                                on_change=on_change_other, on_change_end=on_release_other)
                 other_sliders.append(Row(controls=[
-                    Text(label, color="white", size=13, weight="bold", width=150),
+                    Text(label, color="white", size=11, weight="bold", width=130),
                     slider,
-                    Container(content=val_txt, width=60, height=32, bgcolor=Colors.BLUE_GREY_800,
-                             border_radius=5, border=flet.border.all(1, Colors.BLUE_GREY_600), alignment=alignment.center)
-                ], spacing=10, height=40))
+                    Container(content=val_txt, width=50, height=28, bgcolor=Colors.BLUE_GREY_800,
+                             border_radius=4, border=flet.border.all(1, Colors.BLUE_GREY_600), alignment=alignment.center)
+                ], spacing=5, height=35))
             
             other_settings_container = Container(
                 content=Column([
                     Row([
-                        flet.Icon(flet.Icons.TUNE, size=20, color=Colors.CYAN_400),
-                        Text("Other Settings", size=14, weight="bold", color=Colors.CYAN_400)
-                    ], spacing=8),
-                    Column(controls=other_sliders, spacing=10),
-                ], spacing=10),
+                        flet.Icon(flet.Icons.TUNE, size=16, color=Colors.CYAN_400),
+                        Text("Other Settings", size=12, weight="bold", color=Colors.CYAN_400)
+                    ], spacing=5),
+                    Column(controls=other_sliders, spacing=5),
+                ], spacing=5),
                 bgcolor="#252525",
-                border_radius=8,
+                border_radius=6,
                 border=flet.border.all(1, Colors.BLUE_GREY_700),
-                padding=15,
+                padding=8,
             )
             
             # Buttons moved to top (smaller)
             action_buttons = Row([
-                ElevatedButton("DEFAULT", height=32, width=100,
-                              style=flet.ButtonStyle(bgcolor=Colors.RED_700, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=6)), 
+                ElevatedButton("DEFAULT", height=28, width=80,
+                              style=flet.ButtonStyle(bgcolor=Colors.RED_700, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=5)), 
                               on_click=self._restore_global_defaults),
-                ElevatedButton("Send & Save", height=32, width=130,
-                              style=flet.ButtonStyle(bgcolor=Colors.GREEN_700, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=6)), 
+                ElevatedButton("Send & Save", height=28, width=100,
+                              style=flet.ButtonStyle(bgcolor=Colors.GREEN_700, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=5)), 
                               on_click=self._send_global_settings)
-            ], spacing=10)
+            ], spacing=5)
             
             return Column(controls=[
                 # Header with buttons
                 Row([
                     Row([
-                        flet.Icon(flet.Icons.SETTINGS, size=28, color=Colors.CYAN_400),
-                        Text("GLOBAL SETTINGS", size=20, weight="bold", color="white"),
-                    ], spacing=10),
+                        flet.Icon(flet.Icons.SETTINGS, size=22, color=Colors.CYAN_400),
+                        Text("GLOBAL SETTINGS", size=16, weight="bold", color="white"),
+                    ], spacing=5),
                     Container(expand=True), # Spacer to push buttons to right
                     action_buttons
                 ], alignment=MainAxisAlignment.SPACE_BETWEEN),
                 
-                flet.Divider(color=Colors.BLUE_GREY_700, height=5),
+                flet.Divider(color=Colors.BLUE_GREY_700, height=3),
 
                 # Temperature sensors row
                 sensors_row,
@@ -1123,7 +1123,7 @@ class SettingsView(flet.Container):
                 # Other settings
                 other_settings_container,
                 
-            ], spacing=15, expand=True)
+            ], spacing=8, expand=True)
 
         else:
             # --- WIDOK CHWYTAKÓW ---
@@ -1132,20 +1132,20 @@ class SettingsView(flet.Container):
             self.current_gripper_values = [item[3] for item in config["sliders"]]
             sliders_list = []
             for index, (label, min_val, max_val, start_val) in enumerate(config["sliders"]):
-                val_txt = Text(str(int(start_val)), color="white", size=14, weight="bold")
+                val_txt = Text(str(int(start_val)), color="white", size=12, weight="bold")
                 def on_change_local(e, v_txt=val_txt, idx=index):
                     v_txt.value = str(int(e.control.value)); v_txt.update(); self.current_gripper_values[idx] = int(e.control.value)
-                sliders_list.append(Container(content=Row(controls=[Text(label, color="white", size=14, weight="bold", width=120), Slider(min=min_val, max=max_val, value=start_val, label="{value}", active_color=Colors.BLUE_ACCENT_400, expand=True, on_change=on_change_local), Container(content=val_txt, **{"width": 60, "height": 30, "bgcolor": Colors.BLUE_GREY_800, "border_radius": 5, "border": flet.border.all(1, Colors.BLUE_GREY_600), "alignment": alignment.center})], alignment=MainAxisAlignment.SPACE_BETWEEN, spacing=10), padding=flet.padding.only(bottom=5)))
+                sliders_list.append(Container(content=Row(controls=[Text(label, color="white", size=12, weight="bold", width=100), Slider(min=min_val, max=max_val, value=start_val, label="{value}", active_color=Colors.BLUE_ACCENT_400, expand=True, on_change=on_change_local), Container(content=val_txt, **{"width": 50, "height": 26, "bgcolor": Colors.BLUE_GREY_800, "border_radius": 4, "border": flet.border.all(1, Colors.BLUE_GREY_600), "alignment": alignment.center})], alignment=MainAxisAlignment.SPACE_BETWEEN, spacing=5), padding=flet.padding.only(bottom=3)))
             
             action_buttons_row = [
-                ElevatedButton("DEFAULT", height=40, width=100, style=flet.ButtonStyle(bgcolor=Colors.RED_700, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=8)), on_click=self._restore_default_settings),
-                ElevatedButton("Send & Save", height=40, width=150, style=flet.ButtonStyle(bgcolor=Colors.GREEN_700, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=8)), on_click=self._on_send_and_save_click)
+                ElevatedButton("DEFAULT", height=35, width=80, style=flet.ButtonStyle(bgcolor=Colors.RED_700, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=6)), on_click=self._restore_default_settings),
+                ElevatedButton("Send & Save", height=35, width=120, style=flet.ButtonStyle(bgcolor=Colors.GREEN_700, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=6)), on_click=self._on_send_and_save_click)
             ]
 
             if image_name == "render3.png":
                 tuning_btn = ElevatedButton(
-                    "TUNING", height=40, width=120, icon=Icons.TUNE,
-                    style=flet.ButtonStyle(bgcolor=Colors.ORANGE_700, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=8)),
+                    "TUNING", height=35, width=100, icon=Icons.TUNE,
+                    style=flet.ButtonStyle(bgcolor=Colors.ORANGE_700, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=6)),
                     on_click=self._open_egrip_tuning
                 )
                 action_buttons_row.insert(1, tuning_btn) 
@@ -1153,13 +1153,13 @@ class SettingsView(flet.Container):
             return Row(controls=[
                 Container(
                     content=Image(src=config["image"], fit=flet.ImageFit.CONTAIN), 
-                    width=450, 
+                    width=380, 
                     expand=False, 
                     **podramka_obrazkowa_style  
                 ),
                 Container(content=Column(controls=[
-                    Text(config["title"], size=20, weight="bold", color="white"), 
+                    Text(config["title"], size=16, weight="bold", color="white"), 
                     Column(controls=sliders_list, scroll=ScrollMode.ADAPTIVE, expand=True), 
-                    Row(controls=action_buttons_row, alignment=MainAxisAlignment.END, spacing=10)
-                ], spacing=15, expand=True), **podramka_style, expand=True)
-            ], spacing=10, expand=True)
+                    Row(controls=action_buttons_row, alignment=MainAxisAlignment.END, spacing=5)
+                ], spacing=8, expand=True), **podramka_style, expand=True)
+            ], spacing=5, expand=True)
