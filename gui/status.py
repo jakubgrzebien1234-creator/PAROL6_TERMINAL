@@ -43,8 +43,7 @@ class StatusView(flet.Container):
                 # --- 4. GENERAL STATUS ---
                 self._create_header("SYSTEM STATUS"),
                 self._create_status_row("Connection", "Disconnected", color=Colors.GREY_400, key="CONN_STAT"),
-                self._create_status_row("Op. Mode", "Manual", color=Colors.BLUE_400, key="OP_MODE"),
-                self._create_status_row("Last Error", "None", color=Colors.GREY_400, key="LAST_ERR"),
+                self._create_status_row("Port", "--", color=Colors.BLUE_400, key="PORT_NAME"),
             ],
             scroll=ScrollMode.ADAPTIVE,
             spacing=5,
@@ -65,14 +64,14 @@ class StatusView(flet.Container):
                 self._create_status_row("Limit Switch J5", "RELEASED", color=Colors.GREEN_400, key="LS5"),
                 self._create_status_row("Limit Switch J6", "RELEASED", color=Colors.GREEN_400, key="LS6"),
 
-                # --- 2. COLLISIONS ---
-                self._create_header("COLLISIONS (StallGuard)"),
-                self._create_status_row("Axis J1", "NONE", color=Colors.GREEN_400, key="SG1"),
-                self._create_status_row("Axis J2", "NONE", color=Colors.GREEN_400, key="SG2"),
-                self._create_status_row("Axis J3", "NONE", color=Colors.GREEN_400, key="SG3"),
-                self._create_status_row("Axis J4", "NONE", color=Colors.GREEN_400, key="SG4"),
-                self._create_status_row("Axis J5", "NONE", color=Colors.GREEN_400, key="SG5"),
-                self._create_status_row("Axis J6", "NONE", color=Colors.GREEN_400, key="SG6")     
+                # --- 2. DRIVES STATUS (New) ---
+                self._create_header("DRIVES STATUS"),
+                self._create_status_row("Motor 1 Connected", "True", color=Colors.GREEN_400, key="M1_CONN"),
+                self._create_status_row("Motor 2 Connected", "True", color=Colors.GREEN_400, key="M2_CONN"),
+                self._create_status_row("Motor 3 Connected", "True", color=Colors.GREEN_400, key="M3_CONN"),
+                self._create_status_row("Motor 4 Connected", "True", color=Colors.GREEN_400, key="M4_CONN"),
+                self._create_status_row("Motor 5 Connected", "True", color=Colors.GREEN_400, key="M5_CONN"),
+                self._create_status_row("Motor 6 Connected", "True", color=Colors.GREEN_400, key="M6_CONN"),
             ],
             scroll=ScrollMode.ADAPTIVE,
             spacing=5,

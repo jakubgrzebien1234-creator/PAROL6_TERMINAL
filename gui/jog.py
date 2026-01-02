@@ -2,25 +2,32 @@ import flet
 import threading
 import time
 import math
+import numpy as np
+from scipy.spatial.transform import Rotation as R
+
+# Import KinematicsEngine from cartesian module
+try:
+    from gui.cartesian import KinematicsEngine
+except ImportError:
+    KinematicsEngine = None
 
 class JogView(flet.Container):
     """
-    JOG View - Wersja z wysyłaniem grupowym (J_...)
+    JOG View - Uses URDF-based kinematics (same as CartesianView)
     """
 
-    def __init__(self, uart_communicator, on_status_update=None):
+    def __init__(self, uart_communicator, on_status_update=None, on_error=None):
         super().__init__()
         
         self.uart = uart_communicator
-        self.on_status_update = on_status_update 
+        self.on_status_update = on_status_update
+        self.on_error = on_error  # Callback do wysyłania błędów 
         
-        # --- KONFIGURACJA KIERUNKÓW ---
-        self.AXIS_DIRECTIONS = {
-            "J1": -1, "J2": -1, "J3": -1, "J4": -1, "J5": -1, "J6": -1
-        }
-        # Te osie będą wyświetlane z odwrotnym znakiem w GUI (dla użytkownika), 
-        # ale do robota wysyłane są "surowe" wartości zgodne z wewnętrzną logiką.
-        self.DISPLAY_INVERTED = ["J1", "J2", "J3", "J4", "J5"]
+        # Initialize URDF-based kinematics engine
+        if KinematicsEngine:
+            self.ik = KinematicsEngine("resources/PAROL6.urdf")
+        else:
+            self.ik = None
         
         # --- ZMIENNE STANU ---
         self.is_jogging = False
@@ -42,14 +49,6 @@ class JogView(flet.Container):
             "J1": (-90, 90), "J2": (-50, 140), "J3": (-100, 70),
             "J4": (-100, 180), "J5": (-120, 110), "J6": (-110, 180) 
         }
-        self.dh_params = [
-            {"a": 23.42,   "alpha": -math.pi/2, "d": 110.50,  "theta": 0},
-            {"a": 180.00,  "alpha": math.pi,    "d": 0,       "theta": -math.pi/2},
-            {"a": -43.50,  "alpha": math.pi/2,  "d": 0,       "theta": math.pi},
-            {"a": 0,       "alpha": -math.pi/2, "d": -176.35, "theta": 0},
-            {"a": 0,       "alpha": math.pi/2,  "d": 0,       "theta": 0},
-            {"a": -100.00, "alpha": math.pi,    "d": -62.80,  "theta": math.pi}
-        ]
 
         self.padding = 10 
         self.motors_list = ["Motor 1 (J1)", "Motor 2 (J2)", "Motor 3 (J3)", "Motor 4 (J4)", "Motor 5 (J5)", "Motor 6 (J6)"]
@@ -88,13 +87,13 @@ class JogView(flet.Container):
         TOOL_BTN_H = 40 
         tools_column = flet.Column([
             speed_panel, flet.Container(height=5),
-            flet.ElevatedButton("HOME", icon=flet.Icons.HOME, style=flet.ButtonStyle(bgcolor=flet.Colors.BLUE_GREY_700, color="white", shape=flet.RoundedRectangleBorder(radius=8)), height=TOOL_BTN_H, width=10000, on_click=self.on_home_click),
-            flet.ElevatedButton("SAFETY", icon=flet.Icons.SHIELD, style=flet.ButtonStyle(bgcolor=flet.Colors.TEAL_700, color="white", shape=flet.RoundedRectangleBorder(radius=8)), height=TOOL_BTN_H, width=10000, on_click=self.on_safety_click),
-            flet.ElevatedButton("GRIPPER CHANGE", icon=flet.Icons.HANDYMAN, style=flet.ButtonStyle(bgcolor=flet.Colors.PURPLE_700, color="white", shape=flet.RoundedRectangleBorder(radius=8)), height=TOOL_BTN_H, width=10000, on_click=self.on_change_tool_click),
-            flet.ElevatedButton("STOP", icon=flet.Icons.STOP_CIRCLE, style=flet.ButtonStyle(bgcolor=flet.Colors.RED_700, color="white", shape=flet.RoundedRectangleBorder(radius=8)), height=TOOL_BTN_H, width=10000, on_click=self.on_stop_click),
-            flet.ElevatedButton("STANDBY", icon=flet.Icons.ACCESSIBILITY, style=flet.ButtonStyle(bgcolor=flet.Colors.ORANGE_900, color="white", shape=flet.RoundedRectangleBorder(radius=8)), height=TOOL_BTN_H, width=10000, on_click=self.on_standby_click),
-            flet.Container(expand=True),
-            flet.ElevatedButton("ERROR RESET", icon=flet.Icons.RESTART_ALT, style=flet.ButtonStyle(bgcolor=flet.Colors.ORANGE_800, color="white", shape=flet.RoundedRectangleBorder(radius=8)), height=TOOL_BTN_H, width=10000, on_click=self.on_reset_click)
+            flet.ElevatedButton("HOME", icon=flet.Icons.HOME, style=flet.ButtonStyle(bgcolor=flet.Colors.BLUE_GREY_700, color="white", shape=flet.RoundedRectangleBorder(radius=8)), on_click=self.on_home_click, expand=True, width=10000),
+            flet.ElevatedButton("SAFETY", icon=flet.Icons.SHIELD, style=flet.ButtonStyle(bgcolor=flet.Colors.TEAL_700, color="white", shape=flet.RoundedRectangleBorder(radius=8)), on_click=self.on_safety_click, expand=True, width=10000),
+            flet.ElevatedButton("GRIPPER CHANGE", icon=flet.Icons.HANDYMAN, style=flet.ButtonStyle(bgcolor=flet.Colors.PURPLE_700, color="white", shape=flet.RoundedRectangleBorder(radius=8)), on_click=self.on_change_tool_click, expand=True, width=10000),
+            flet.ElevatedButton("STOP", icon=flet.Icons.STOP_CIRCLE, style=flet.ButtonStyle(bgcolor=flet.Colors.RED_700, color="white", shape=flet.RoundedRectangleBorder(radius=8)), on_click=self.on_stop_click, expand=True, width=10000),
+            flet.ElevatedButton("STANDBY", icon=flet.Icons.ACCESSIBILITY, style=flet.ButtonStyle(bgcolor=flet.Colors.ORANGE_900, color="white", shape=flet.RoundedRectangleBorder(radius=8)), on_click=self.on_standby_click, expand=True, width=10000),
+            # Spacer removed to allow buttons to fill space
+            # ERROR RESET moved to Errors tab
         ], spacing=5, expand=True)
         tools_container = flet.Container(content=tools_column, expand=5, padding=flet.padding.symmetric(horizontal=5))
 
@@ -118,6 +117,14 @@ class JogView(flet.Container):
 
         position_frame = flet.Container(content=pos_list, **panel_style, expand=4)
         self.content = flet.Row([motors_container, tools_container, position_frame], spacing=10, vertical_alignment=flet.CrossAxisAlignment.STRETCH)
+
+    # --- LIFECYCLE METHODS ---
+    def did_mount(self):
+        # Force UI update when view is mounted
+        try:
+            self._calculate_forward_kinematics()
+            self.update()
+        except: pass
 
     # -------------------------------------------------------------------------
     # >>> NOWA FUNKCJA: WYSYŁANIE WSZYSTKICH OSI <<<
@@ -146,13 +153,14 @@ class JogView(flet.Container):
     def update_joints_and_fk(self, joint_values: dict):
         for k, v in joint_values.items():
             self.current_raw_values[k] = v 
-            if not self.initial_sync_done and not self.is_jogging:
+            
+            # Only sync on INITIAL startup (before first jog) to avoid feedback overwriting user targets
+            if not self.initial_sync_done:
                 self.internal_target_values[k] = v
             
-            display_val = v
-            if k in self.DISPLAY_INVERTED:
-                display_val = -v
+            # Display calculated/commanded value (internal_target_values)
             if k in self.position_value_labels:
+                display_val = self.internal_target_values.get(k, 0.0)
                 self.position_value_labels[k].value = f"{display_val:.2f}°"
         
         if joint_values:
@@ -162,12 +170,13 @@ class JogView(flet.Container):
 
     def _jog_thread(self, joint_code, button_type):
         STEP_INCREMENT = 0.5
-        direction_multiplier = self.AXIS_DIRECTIONS.get(joint_code, 1)
+        # No direction inversion needed with URDF-based kinematics
+        # + button = positive direction, - button = negative direction
 
         while self.is_jogging:
             current_target = self.internal_target_values.get(joint_code, 0.0)
             button_dir = 1 if button_type == "plus" else -1
-            delta = STEP_INCREMENT * button_dir * direction_multiplier
+            delta = STEP_INCREMENT * button_dir
             new_target = current_target + delta
             
             if joint_code in self.joint_limits:
@@ -179,6 +188,9 @@ class JogView(flet.Container):
             
             # >>> ZMIANA: Zamiast wysyłać J1_..., wysyłamy wszystko <<<
             self.send_all_joints()
+            
+            # Update local UI immediately (FK + displayed angles)
+            self.update_joints_and_fk(self.internal_target_values)
             
             time.sleep(0.05)
 
@@ -224,10 +236,50 @@ class JogView(flet.Container):
             self.page.update()
 
     def on_home_click(self, e):
-        if self.uart: 
-            print("[JOG] Start Homing")
-            self.uart.send_message("HOME")
-            self._show_homing_progress_dialog()
+        self._show_homing_choice_dialog()
+
+    def _show_homing_choice_dialog(self):
+        if not self.page: return
+        
+        def close_dlg(e):
+            self.page.close(dlg)
+            self.page.update()
+
+        def on_start_homing(e):
+            close_dlg(e)
+            if self.uart:
+                print("[JOG] Start Homing")
+                self.uart.send_message("HOME")
+                self._show_homing_progress_dialog()
+
+        def on_confirm_position(e):
+            close_dlg(e)
+            # Use GLOBAL callback to set homing for ALL views
+            if hasattr(self, 'on_global_set_homed') and self.on_global_set_homed:
+                self.on_global_set_homed(True)
+            else:
+                self.set_homed_status(True)  # Fallback
+            # Log HMS warning - homing skipped
+            if self.on_error:
+                self.on_error("HMS")
+            self.page.snack_bar = flet.SnackBar(flet.Text("Robot position manually confirmed."), bgcolor="green")
+            self.page.snack_bar.open = True
+            self.page.update()
+
+        dlg = flet.AlertDialog(
+            title=flet.Text("Homing Selection"),
+            content=flet.Container(
+                width=350,
+                content=flet.Text("Do you want to start automatic homing sequence or confirm that the robot is currently in the home position?")
+            ),
+            actions=[
+                flet.TextButton("Start Homing", on_click=on_start_homing),
+                flet.TextButton("Confirm Position", on_click=on_confirm_position),
+            ],
+            actions_alignment=flet.MainAxisAlignment.END,
+        )
+        self.page.open(dlg)
+        self.page.update()
 
     def _show_homing_progress_dialog(self):
         if not self.page: return
@@ -250,34 +302,92 @@ class JogView(flet.Container):
 
     def show_homing_required_dialog(self):
         if not self.page: return
-        self.page.open(flet.AlertDialog(title=flet.Text("Homing Required!")))
+        # Trigger E1 error
+        if self.on_error:
+            self.on_error("E1")
+            
+        def close_dlg(e):
+            self.page.close(dlg)
+            self.page.update()
+
+        dlg = flet.AlertDialog(
+            modal=True,
+            title=flet.Row([
+                flet.Icon(flet.Icons.WARNING_AMBER, color=flet.Colors.AMBER_400, size=30),
+                flet.Text("HOMING REQUIRED", color=flet.Colors.RED_200, weight="bold")
+            ], alignment=flet.MainAxisAlignment.START, spacing=10),
+            content=flet.Container(
+                content=flet.Text("The robot must be homed before performing any movement.\nPlease run the Homing sequence first.", size=16),
+                padding=10
+            ),
+            actions=[
+                flet.ElevatedButton("OK", on_click=close_dlg, style=flet.ButtonStyle(bgcolor=flet.Colors.RED_700, color="white"))
+            ],
+            actions_alignment=flet.MainAxisAlignment.END,
+            bgcolor="#1f1f1f",
+        )
+        self.page.open(dlg)
         self.page.update()
 
     def on_stop_click(self, e):
+        # Trigger W1 warning
+        if self.on_error:
+            self.on_error("W1")
         if self.uart: self.uart.send_message("EGRIP_STOP"); self.is_jogging = False
         
-    def on_reset_click(self, e):
-        if self.uart: self.uart.send_message("COLLISION_OK")
-        self.internal_target_values = self.current_raw_values.copy()
+    # on_reset_click removed from here as per request
         
     def on_change_tool_click(self, e):
         if self.uart: self.uart.send_message("TOOL_CHANGE")
                 
     def on_standby_click(self, e):
-        # STANDBY: Zerujemy wszystkie cele i wysyłamy jedną ramkę
-        for i in range(1, 7): 
-            self.internal_target_values[f"J{i}"] = 0.0
-        self.send_all_joints()
+        # Target: All zeros
+        target_deg = [0.0] * 6
+        self._animate_move(target_deg)
                 
     def on_safety_click(self, e):
-        # SAFETY: Ustawiamy predefiniowane pozycje i wysyłamy jedną ramkę
-        visual_targets = [0, 50, -70, -90, 0, 0]
-        for i, vis_val in enumerate(visual_targets):
-            idx = f"J{i+1}"
-            raw_val = vis_val
-            if idx in self.DISPLAY_INVERTED: raw_val = -vis_val 
-            self.internal_target_values[idx] = raw_val
-        self.send_all_joints()
+        # Trigger W2 warning
+        if self.on_error:
+            self.on_error("W2")
+        # Target: [0, 50, -70, -90, 0, 0] degrees (Harmonized with CartesianView)
+        target_deg = [0, -50, 70, 90, 0, 0]
+        self._animate_move(target_deg)
+
+    def _animate_move(self, target_joints_deg):
+        """Moves robot to target joints smoothly using current velocity."""
+        if self.is_jogging: return
+        self.is_jogging = True
+        
+        def run():
+            # Standard movement speed: 90 deg/s at 100% velocity
+            # Loop runs at 20Hz (0.05s), so max step is 4.5 deg
+            while self.is_jogging:
+                current = np.array([self.internal_target_values[f"J{i}"] for i in range(1, 7)])
+                target = np.array(target_joints_deg)
+                diff = target - current
+                dist = np.linalg.norm(diff)
+                
+                if dist < 0.1:
+                    for i, val in enumerate(target_joints_deg):
+                        self.internal_target_values[f"J{i+1}"] = val
+                    self.send_all_joints()
+                    self.update_joints_and_fk(self.internal_target_values)
+                    break
+                
+                factor = self.speed_percent / 100.0
+                step_size = min(dist, 4.5 * factor)
+                
+                new_pos = current + (diff / dist) * step_size
+                for i, val in enumerate(new_pos):
+                    self.internal_target_values[f"J{i+1}"] = val
+                
+                self.send_all_joints()
+                self.update_joints_and_fk(self.internal_target_values)
+                time.sleep(0.05)
+            
+            self.is_jogging = False
+            
+        threading.Thread(target=run, daemon=True).start()
     
     def change_speed(self, delta):
         self.speed_percent = max(10, min(100, self.speed_percent + delta))
@@ -314,26 +424,34 @@ class JogView(flet.Container):
             return flet.Container(content=flet.Column([flet.Text(display_name, size=14, weight="bold", color="white", text_align="center"), flet.Row([mk_btn("-", "minus", joint_code), mk_btn("+", "plus", joint_code)], spacing=5, expand=True)], spacing=2), **container_style)
 
     def _calculate_forward_kinematics(self):
+        """
+        Use URDF-based FK from KinematicsEngine (same as CartesianView).
+        This ensures X,Y,Z,A,B,C values are identical in both tabs.
+        """
+        if not self.ik or not self.ik.chain:
+            return
+            
         try:
-            joints_visual = {}
-            for k, v in self.current_raw_values.items():
-                if k in self.DISPLAY_INVERTED: joints_visual[k] = -v
-                else: joints_visual[k] = v
-            th = [math.radians(joints_visual[f"J{i}"]) for i in range(1, 7)]
-            T = [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
-            for i in range(6):
-                a, alpha, d, theta = self.dh_params[i]["a"], self.dh_params[i]["alpha"], self.dh_params[i]["d"], th[i] + self.dh_params[i]["theta"]
-                ct, st, ca, sa = math.cos(theta), math.sin(theta), math.cos(alpha), math.sin(alpha)
-                Ti = [[ct, -st*ca, st*sa, a*ct], [st, ct*ca, -ct*sa, a*st], [0, sa, ca, d], [0, 0, 0, 1]]
-                T_new = [[sum(T[r][k]*Ti[k][c] for k in range(4)) for c in range(4)] for r in range(4)]
-                T = T_new
-            x, y, z = T[0][3], T[1][3], T[2][3]
-            pitch = math.atan2(-T[2][0], math.sqrt(T[0][0]**2 + T[1][0]**2))
-            yaw, roll = (0, math.atan2(T[0][1], T[1][1])) if math.isclose(math.cos(pitch), 0) else (math.atan2(T[1][0], T[0][0]), math.atan2(T[2][1], T[2][2]))
-            if "X" in self.tcp_labels: self.tcp_labels["X"].value = f"{x:.2f} mm"
-            if "Y" in self.tcp_labels: self.tcp_labels["Y"].value = f"{y:.2f} mm"
-            if "Z" in self.tcp_labels: self.tcp_labels["Z"].value = f"{z:.2f} mm"
-            if "A" in self.tcp_labels: self.tcp_labels["A"].value = f"{math.degrees(yaw):.2f}°"
-            if "B" in self.tcp_labels: self.tcp_labels["B"].value = f"{math.degrees(pitch):.2f}°"
-            if "C" in self.tcp_labels: self.tcp_labels["C"].value = f"{math.degrees(roll):.2f}°"
-        except: pass
+            # Convert current_raw_values (degrees) to radians for FK
+            joints_rad = [np.radians(self.current_raw_values.get(f"J{i+1}", 0.0)) for i in range(6)]
+            
+            # Get TCP matrix from URDF-based FK
+            tcp_matrix = self.ik.forward_kinematics(joints_rad)
+            pos = tcp_matrix[:3, 3]  # [x, y, z] in meters
+            rot = tcp_matrix[:3, :3]
+            
+            # Calculate Euler angles (same as CartesianView)
+            euler = R.from_matrix(rot).as_euler('xyz', degrees=True)
+            
+            # UPDATE UI - position in mm
+            if "X" in self.tcp_labels: self.tcp_labels["X"].value = f"{pos[0]*1000:.2f} mm"
+            if "Y" in self.tcp_labels: self.tcp_labels["Y"].value = f"{pos[1]*1000:.2f} mm"
+            if "Z" in self.tcp_labels: self.tcp_labels["Z"].value = f"{pos[2]*1000:.2f} mm"
+            
+            # Rotation in degrees
+            if "A" in self.tcp_labels: self.tcp_labels["A"].value = f"{euler[0]:.2f}°"
+            if "B" in self.tcp_labels: self.tcp_labels["B"].value = f"{euler[1]:.2f}°"
+            if "C" in self.tcp_labels: self.tcp_labels["C"].value = f"{euler[2]:.2f}°"
+            
+        except Exception as e:
+            print(f"[JOG] FK error: {e}")

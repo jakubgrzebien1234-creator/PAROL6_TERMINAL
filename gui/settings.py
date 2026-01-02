@@ -43,12 +43,6 @@ class SettingsView(flet.Container):
         self.homing_event = threading.Event()  # <--- TEGO BRAKOWAŁO
         self.current_test_pos = 0.0            # Do śledzenia pozycji w teście
 
-        # Checkbox SYNCHRO
-        self.synchro_checkbox = ft.Checkbox(
-            label="SYNCHRO", value=False, fill_color=Colors.CYAN_400,
-            tooltip="Automatycznie skaluje prędkości innych osi wg przełożeń"
-        )
-
         # Tuning variables
         self.tuning_dialog = None
         self.tuning_slider = None
@@ -70,8 +64,17 @@ class SettingsView(flet.Container):
             1: [ ("A1", 200, 10000), ("V1", 10, 20000), ("AMAX", 1000, 30000), ("VMAX", 10000, 400000), ("D1", 200, 4000) ],
             2: [ ("IHOLD", 0, 31), ("IRUN", 0, 31), ("IHOLDDELAY", 0, 15) ],
             3: [ ("VMAX - HOMING", 5000, 500000), ("AMAX - HOMING", 1000, 8000), ("OFFSET[mm]", -50, 50) ],
-            4: [ ("Sensitivity (STALL_SENS)", -64, 63), ("SGT THRESHOLD", 0, 1000) ]
+            4: [ ("Sensitivity (STALL_SENS)", -64, 63), ("SGT THRESHOLD", 0, 1000) ],
+            5: [ ("OT TEMPERATURE [°C]", 40, 100), ("CT TEMPERATURE [°C]", 20, 60), ("MAX SPEED [%]", 10, 100), ("SAFETY DELAY [ms]", 0, 5000), ("IDLE TIMEOUT [s]", 0, 600) ]
         }
+        
+        # --- GLOBAL SETTINGS DATA ---
+        self.global_settings_data = {}
+        self._load_global_settings()
+
+        # --- GRIPPER SETTINGS DATA ---
+        self.gripper_settings_data = {}
+        self._load_gripper_settings()
 
         self.motor_settings_data = {} 
         self._load_settings() 
@@ -451,15 +454,15 @@ class SettingsView(flet.Container):
 
 
     def _open_egrip_tuning(self, e):
-        if len(self.current_gripper_values) < 3: return
-        current_sens = self.current_gripper_values[2]
+        if len(self.current_gripper_values) < 4: return
+        current_sens = self.current_gripper_values[3]
         self.egrip_sg_result_text.value = "-"
         sens_label = Text(str(int(current_sens)), size=20, weight="bold")
 
         def on_egrip_slider_change(e):
             val = int(e.control.value)
             sens_label.value = str(val); sens_label.update()
-            self.current_gripper_values[2] = val
+            self.current_gripper_values[3] = val
             v_str = ",".join(map(str, self.current_gripper_values))
             if self.comm: self.comm.send_message(f"OT,SGrip,{v_str}\r\n")
 
@@ -507,6 +510,16 @@ class SettingsView(flet.Container):
                 self.comm.send_message(f"OT,homing,J{motor_id},{vals[0]},{vals[1]},{vals[2]}\r\n"); time.sleep(0.15)
                 vals = settings.get(4, [0, 5])
                 self.comm.send_message(f"OT,stall,J{motor_id},{vals[0]},{vals[1]}\r\n"); time.sleep(0.15)
+            
+            # Send Gripper Settings
+            v_vals = self.gripper_settings_data.get("VGrip", [-40, -20, 1])
+            self.comm.send_message(f"OT,VGrip,{','.join(map(str, v_vals))}\r\n"); time.sleep(0.15)
+            s_vals = self.gripper_settings_data.get("SGrip", [10, 20, 5000, 0])
+            self.comm.send_message(f"OT,SGrip,{','.join(map(str, s_vals))}\r\n"); time.sleep(0.15)
+            
+            # Send Global Settings
+            self._send_global_settings()
+            
             time.sleep(1.5) 
             for _ in range(3):
                 if self.comm: self.comm.send_message("CONFIG_DONE\r\n")
@@ -518,7 +531,7 @@ class SettingsView(flet.Container):
                 target_page.open(flet.SnackBar(content=Text("Configuration Complete"), bgcolor=Colors.GREEN_700))
                 target_page.update()
 
-    def _build_slider_ui(self, structure_configs: list, value_configs: list):
+    def _build_slider_ui(self, structure_configs: list, value_configs: list, is_global: bool = False):
         self.sliders_column_container.controls.clear()
         self.sliders_labels = []
         self.slider_controls = []
@@ -529,6 +542,9 @@ class SettingsView(flet.Container):
             "border_radius": 5, "border": flet.border.all(1, Colors.BLUE_GREY_600), 
             "alignment": alignment.center 
         }
+
+        # --- GLOBAL SETTINGS KEYS ---
+        global_keys = ["ot_temp", "ct_temp", "max_speed", "safety_delay", "idle_timeout"]
 
         # --- CALLBACK ZMIANY WARTOŚCI (TU DZIAŁA SYNCHRO) ---
         def on_live_change(e, txt_ctrl, idx, is_float):
@@ -542,34 +558,24 @@ class SettingsView(flet.Container):
 
             txt_ctrl.update()
             
-            # 1. Zapisz wartość dla aktualnie wybranego silnika
-            try:
-                self.motor_settings_data[self.selected_motor_index][self.active_slider_set_id][idx] = save_val
-            except Exception as ex:
-                print(f"Slider update error: {ex}")
-
-            # 2. LOGIKA SYNCHRO (Tylko dla Ramp Settings - ID 1)
-            if self.synchro_checkbox.value and self.active_slider_set_id == 1 and idx in [2, 3]:
+            # Handle Global settings differently
+            if is_global:
                 try:
-                    source_ratio = self.gear_ratios[self.selected_motor_index]
-                    source_val = val
-                    for other_motor_id in range(1, 7):
-                        if other_motor_id == self.selected_motor_index: continue
-                        target_ratio = self.gear_ratios[other_motor_id]
-                        new_val = source_val * (target_ratio / source_ratio)
-                        _, min_limit, max_limit = self.slider_set_definitions[1][idx]
-                        clamped_val = max(min_limit, min(max_limit, new_val))
-                        if not is_float: clamped_val = int(clamped_val)
-                        else: clamped_val = round(clamped_val, 1)
-
-                        if other_motor_id not in self.motor_settings_data: self.motor_settings_data[other_motor_id] = {}
-                        if 1 not in self.motor_settings_data[other_motor_id]:
-                            self.motor_settings_data[other_motor_id][1] = [1500, 2500, 10000, 100000, 1400]
-                        self.motor_settings_data[other_motor_id][1][idx] = clamped_val
-                except Exception as sync_err: print(f"Synchro Error: {sync_err}")
+                    self.global_settings_data[global_keys[idx]] = save_val
+                except Exception as ex:
+                    print(f"Global slider update error: {ex}")
+            else:
+                # 1. Zapisz wartość dla aktualnie wybranego silnika
+                try:
+                    self.motor_settings_data[self.selected_motor_index][self.active_slider_set_id][idx] = save_val
+                except Exception as ex:
+                    print(f"Slider update error: {ex}")
 
         def on_release(e):
-            self._save_settings()
+            if is_global:
+                self._save_global_settings()
+            else:
+                self._save_settings()
 
         for i, (s_label, s_min, s_max) in enumerate(structure_configs):
             s_val = value_configs[i] if i < len(value_configs) else 0
@@ -598,10 +604,25 @@ class SettingsView(flet.Container):
         if self.active_slider_set_id == 4:
             tuning_btn = ElevatedButton("StallGuard Tuning", icon=flet.Icons.TUNE, style=flet.ButtonStyle(bgcolor=Colors.ORANGE_700, color="white", shape=flet.RoundedRectangleBorder(radius=8)), on_click=self._start_tuning_procedure)
             self.sliders_column_container.controls.append(Container(content=tuning_btn, alignment=alignment.center, padding=flet.padding.only(top=15)))
+        
+        # Add info text for Global settings
+        if self.active_slider_set_id == 5:
+            info_text = Text("⚙️ Global settings apply to the entire robot system", size=12, color=Colors.BLUE_GREY_400, italic=True)
+            self.sliders_column_container.controls.insert(0, Container(content=info_text, padding=flet.padding.only(bottom=10)))
     
     def _on_slider_set_select(self, idx):
         self.active_slider_set_id = idx
-        self._build_slider_ui(self.slider_set_definitions.get(idx, []), self.motor_settings_data.get(self.selected_motor_index, {}).get(idx, []))
+        if idx == 5:  # Global Settings
+            global_vals = [
+                self.global_settings_data.get("ot_temp", 80),
+                self.global_settings_data.get("ct_temp", 40),
+                self.global_settings_data.get("max_speed", 100),
+                self.global_settings_data.get("safety_delay", 500),
+                self.global_settings_data.get("idle_timeout", 300)
+            ]
+            self._build_slider_ui(self.slider_set_definitions.get(idx, []), global_vals, is_global=True)
+        else:
+            self._build_slider_ui(self.slider_set_definitions.get(idx, []), self.motor_settings_data.get(self.selected_motor_index, {}).get(idx, []))
         if self.page: self.sliders_column_container.update() 
             
     def _on_motor_select(self, idx):
@@ -625,30 +646,48 @@ class SettingsView(flet.Container):
 
     def _restore_default_settings(self, e):
         if self.active_view_name == "render1.png":
-            self.motor_settings_data = self._get_default_settings()
-            self._save_settings()
-            self._on_motor_select(self.selected_motor_index)
+            if self.active_slider_set_id == 5:  # Global Settings
+                self.global_settings_data = self._get_default_global_settings()
+                self._save_global_settings()
+                self._on_slider_set_select(5)
+            else:
+                self.motor_settings_data = self._get_default_settings()
+                self._save_settings()
+                self._on_motor_select(self.selected_motor_index)
         elif self.active_view_name in ["render2.png", "render3.png"]:
             self.content = self._create_detail_view(self.active_view_name)
             if self.page: self.update()
 
     def _on_send_and_save_click(self, e):
-        self._save_settings()
         final_command = ""
         if self.active_view_name == "render1.png":
-            option_map = { 1: "ramp", 2: "current", 3: "homing", 4: "stall" }
-            opt = option_map.get(self.active_slider_set_id, "unknown")
-            mot = f"J{self.selected_motor_index}"
-            try:
-                vals = self.motor_settings_data[self.selected_motor_index][self.active_slider_set_id]
-                v_str = ",".join(map(str, vals))
-                final_command = f"OT,{opt},{mot},{v_str}"
-            except: pass
+            if self.active_slider_set_id == 5:  # Global Settings
+                self._save_global_settings()
+                ot = self.global_settings_data.get("ot_temp", 80)
+                ct = self.global_settings_data.get("ct_temp", 40)
+                max_spd = self.global_settings_data.get("max_speed", 100)
+                safety = self.global_settings_data.get("safety_delay", 500)
+                idle = self.global_settings_data.get("idle_timeout", 300)
+                final_command = f"OT,global,{ot},{ct},{max_spd},{safety},{idle}"
+            else:
+                self._save_settings()
+                option_map = { 1: "ramp", 2: "current", 3: "homing", 4: "stall" }
+                opt = option_map.get(self.active_slider_set_id, "unknown")
+                mot = f"J{self.selected_motor_index}"
+                try:
+                    vals = self.motor_settings_data[self.selected_motor_index][self.active_slider_set_id]
+                    v_str = ",".join(map(str, vals))
+                    final_command = f"OT,{opt},{mot},{v_str}"
+                except: pass
         elif self.active_view_name == "render2.png":
             v_str = ",".join(map(str, self.current_gripper_values))
+            self.gripper_settings_data["VGrip"] = list(self.current_gripper_values)
+            self._save_gripper_settings()
             final_command = f"OT,VGrip,{v_str}"
         elif self.active_view_name == "render3.png":
             v_str = ",".join(map(str, self.current_gripper_values))
+            self.gripper_settings_data["SGrip"] = list(self.current_gripper_values)
+            self._save_gripper_settings()
             final_command = f"OT,SGrip,{v_str}"
 
         if final_command:
@@ -685,6 +724,89 @@ class SettingsView(flet.Container):
         except Exception as e:
             print(f"JSON Save Error: {e}")
 
+    def _load_global_settings(self):
+        try:
+            with open("global_settings.json", "r") as f:
+                self.global_settings_data = json.load(f)
+        except:
+            self.global_settings_data = self._get_default_global_settings()
+            self._save_global_settings()
+
+    def _save_global_settings(self):
+        try:
+            with open("global_settings.json", "w") as f:
+                json.dump(self.global_settings_data, f, indent=4)
+        except Exception as e:
+            print(f"Global Settings Save Error: {e}")
+
+    def _get_default_global_settings(self):
+        return {
+            # Temperature sensors (4 sensors, each with OT warning and CT critical)
+            "sensor_1_ot": 50, "sensor_1_ct": 70,
+            "sensor_2_ot": 50, "sensor_2_ct": 70,
+            "sensor_3_ot": 50, "sensor_3_ct": 70,
+            "sensor_4_ot": 50, "sensor_4_ct": 70,
+            # Other settings
+            "max_speed": 100,
+            "idle_timeout": 300,
+            "mag_time": 2
+        }
+
+    def _load_gripper_settings(self):
+        try:
+            with open("gripper_settings.json", "r") as f:
+                self.gripper_settings_data = json.load(f)
+        except:
+            self.gripper_settings_data = self._get_default_gripper_settings()
+            self._save_gripper_settings()
+
+    def _save_gripper_settings(self):
+        try:
+            with open("gripper_settings.json", "w") as f:
+                json.dump(self.gripper_settings_data, f, indent=4)
+        except Exception as e:
+            print(f"Gripper Settings Save Error: {e}")
+
+    def _get_default_gripper_settings(self):
+        return {
+            "VGrip": [-40, -20, 1],
+            "SGrip": [10, 20, 5000, 0]
+        }
+
+
+    def _restore_global_defaults(self, e):
+        """Restore global settings to defaults and refresh the view"""
+        self.global_settings_data = self._get_default_global_settings()
+        self._save_global_settings()
+        self.content = self._create_detail_view("global_settings")
+        if self.page: self.update()
+
+    def _send_global_settings(self, e=None):
+        """Send global settings via UART and save"""
+        self._save_global_settings()
+        
+        # Get all sensor temperatures
+        s1_ot = self.global_settings_data.get("sensor_1_ot", 50)
+        s1_ct = self.global_settings_data.get("sensor_1_ct", 70)
+        s2_ot = self.global_settings_data.get("sensor_2_ot", 50)
+        s2_ct = self.global_settings_data.get("sensor_2_ct", 70)
+        s3_ot = self.global_settings_data.get("sensor_3_ot", 50)
+        s3_ct = self.global_settings_data.get("sensor_3_ct", 70)
+        s4_ot = self.global_settings_data.get("sensor_4_ot", 50)
+        s4_ct = self.global_settings_data.get("sensor_4_ct", 70)
+        
+        max_spd = self.global_settings_data.get("max_speed", 100)
+        idle = self.global_settings_data.get("idle_timeout", 300)
+        mag_time = self.global_settings_data.get("mag_time", 2)
+        
+        # Format: OT,global,S1_OT,S1_CT,S2_OT,S2_CT,S3_OT,S3_CT,S4_OT,S4_CT,MAX_SPD,IDLE,MAG_TIME
+        final_command = f"OT,global,{s1_ot},{s1_ct},{s2_ot},{s2_ct},{s3_ot},{s3_ct},{s4_ot},{s4_ct},{max_spd},{idle},{mag_time}\r\n"
+        print(f"Sending: {final_command.strip()}")
+        if self.comm and self.comm.is_open():
+            self.comm.send_message(final_command)
+        else:
+            print("No connection")
+
     def reset_view(self):
         self.content = self._create_main_view()
         if self.page: self.page.update()
@@ -706,11 +828,54 @@ class SettingsView(flet.Container):
         panel1 = self._create_clickable_panel("render1.png", "render1.png")
         panel2 = self._create_clickable_panel("render2.png", "render2.png")
         panel3 = self._create_clickable_panel("render3.png", "render3.png")
-        return Row(controls=[Container(content=panel1, expand=3), Container(content=Column([panel2, panel3], spacing=10, expand=True), expand=1)], spacing=10, expand=True)
+        panel4 = self._create_global_settings_panel()
+        return Row(controls=[
+            Container(content=panel1, expand=2),  # Robot panel (smaller)
+            Container(content=Column([panel2, panel3], spacing=10, expand=True), expand=1),  # Grippers
+            Container(content=Column([panel4], spacing=10, expand=True), expand=1)  # Global Settings
+        ], spacing=10, expand=True)
+
+    def _create_global_settings_panel(self):
+        """Create a clickable panel for Global Settings"""
+        panel_style = { 
+            "bgcolor": "#2D2D2D", 
+            "border_radius": 10, 
+            "border": flet.border.all(2, "#555555"), 
+            "expand": True 
+        }
+        
+        # Stack allows layering text over a big icon
+        panel_content = ft.Stack(
+            controls=[
+                # Huge Icon in the center
+                Container(
+                    content=flet.Icon(flet.Icons.SETTINGS, size=140, color=Colors.CYAN_400),
+                    alignment=alignment.center,
+                    expand=True,
+                ),
+                # Text at the bottom
+                Container(
+                    content=Text("GLOBAL SETTINGS", size=20, weight="bold", color="white", text_align=flet.TextAlign.CENTER),
+                    alignment=alignment.bottom_center,
+                    padding=flet.padding.only(bottom=15),
+                )
+            ],
+            expand=True
+        )
+        
+        return flet.GestureDetector(
+            on_tap=lambda e: self.on_image_click(e, "global_settings"),
+            content=Container(content=panel_content, **panel_style),
+            expand=True
+        )
 
     def _get_gripper_config(self, image_name):
-        if image_name == "render2.png": return { "title": "ROTARY GRIPPER", "image": "Gripper1.png", "sliders": [("Vacuum Power", 0, 100, 50), ("Pump Time", 0, 30, 10)] }
-        elif image_name == "render3.png": return { "title": "VERTICAL GRIPPER", "image": "Gripper2.png", "sliders": [("Offset Z [mm]", 0, 300, 0), ("Grip Speed", 200, 100000, 5000), ("Grip Force", -63, 63, 0)] }
+        if image_name == "render2.png": 
+            vals = self.gripper_settings_data.get("VGrip", [-40, -20, 1])
+            return { "title": "ROTARY GRIPPER", "image": "Gripper1.png", "sliders": [("Pump On Pressure [kPa]", -50, -10, vals[0]), ("Pump Off Pressure [kPa]", -40, 0, vals[1]), ("Valve Delay [s]", 0, 3, vals[2])] }
+        elif image_name == "render3.png": 
+            vals = self.gripper_settings_data.get("SGrip", [10, 20, 5000, 0])
+            return { "title": "VERTICAL GRIPPER", "image": "Gripper2.png", "sliders": [("IHOLD", 0, 31, vals[0]), ("IRUN", 0, 31, vals[1]), ("Grip Speed", 200, 100000, vals[2]), ("Grip Force", -63, 63, vals[3])] }
         return None
 
     def _create_detail_view(self, image_name: str):
@@ -724,19 +889,8 @@ class SettingsView(flet.Container):
             btn_ctrls = [ElevatedButton(text=name, expand=True, style=flet.ButtonStyle(bgcolor=Colors.BLUE_GREY_700, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=8)), on_click=lambda e, i=idx: self._on_motor_select(i)) for idx, name in enumerate(self.motor_names, start=1)]
             
             # --- GÓRNE MENU (Kategorie ustawień) ---
-            top_btns = [ElevatedButton(text=name, height=45, expand=True, style=flet.ButtonStyle(bgcolor=Colors.BLUE_GREY_600, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=8)), on_click=lambda e, i=i: self._on_slider_set_select(i)) for i, name in enumerate(["Ramp", "Current", "Home", "Collision"], start=1)]
+            top_btns = [ElevatedButton(text=name, height=45, expand=True, style=flet.ButtonStyle(bgcolor=Colors.BLUE_GREY_600, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=8)), on_click=lambda e, i=i: self._on_slider_set_select(i)) for i, name in enumerate(["Ramp", "Current", "Home"], start=1)]
             
-            # --- PRZYCISK SYNCHRO (W KONTENERZE DLA WIDOCZNOŚCI) ---
-            synchro_container = Container(
-                content=self.synchro_checkbox,
-                bgcolor=Colors.BLUE_GREY_800,
-                border_radius=8,
-                padding=flet.padding.symmetric(horizontal=10),
-                alignment=alignment.center,
-                height=45,
-                border=flet.border.all(1, Colors.BLUE_GREY_600)
-            )
-
             # --- PRZYCISK DEFAULT ---
             default_btn = ElevatedButton(text="DEFAULT", height=45, width=100, style=flet.ButtonStyle(bgcolor=Colors.RED_700, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=8)), on_click=self._restore_default_settings)
             
@@ -744,7 +898,6 @@ class SettingsView(flet.Container):
             top_toolbar = Row(
                 controls=[
                     *top_btns,          
-                    synchro_container,  
                     default_btn         
                 ], 
                 spacing=5, 
@@ -764,6 +917,134 @@ class SettingsView(flet.Container):
                 Container(content=Column(controls=[Container(content=top_toolbar, **podramka_style), self.sliders_column_container], spacing=10, expand=True), **{**podramka_style, "alignment": alignment.top_center}, expand=7),
                 Column(controls=[Container(content=self.motor_display, **podramka_style, height=50), Container(content=Image(src="stepper60.png", fit=flet.ImageFit.CONTAIN, expand=True), **podramka_obrazkowa_style, expand=1), Row(controls=[send_save_button])], spacing=10, expand=2)
             ], spacing=10, expand=True)
+
+        elif image_name == "global_settings":
+            # --- WIDOK GLOBALNYCH USTAWIEŃ (Touch Panel Friendly - Revised) ---
+            
+            def create_temp_slider(label, min_val, max_val, key, color):
+                """Helper to create a large temperature slider"""
+                start_val = self.global_settings_data.get(key, 50)
+                val_txt = Text(f"{int(start_val)}°", color="white", size=16, weight="bold")
+                
+                def on_change(e, v_txt=val_txt, setting_key=key):
+                    val = int(e.control.value)
+                    v_txt.value = f"{val}°"
+                    v_txt.update()
+                    self.global_settings_data[setting_key] = val
+                    
+                def on_release(e):
+                    self._save_global_settings()
+                
+                slider = Slider(min=min_val, max=max_val, value=start_val, label="{value}°C",
+                               active_color=color, expand=True,
+                               on_change=on_change, on_change_end=on_release)
+                
+                return Row(controls=[
+                    Text(label, color=color, size=14, weight="bold", width=30),
+                    slider,
+                    Container(content=val_txt, width=50, height=32, bgcolor=Colors.BLUE_GREY_800,
+                             border_radius=5, border=flet.border.all(1, color), alignment=alignment.center)
+                ], spacing=2, height=40)
+            
+            def create_sensor_group(sensor_num):
+                """Create a large sensor group"""
+                ot_slider = create_temp_slider("OT", 30, 80, f"sensor_{sensor_num}_ot", Colors.ORANGE_400)
+                ct_slider = create_temp_slider("CT", 50, 100, f"sensor_{sensor_num}_ct", Colors.RED_400)
+                
+                return Container(
+                    content=Column([
+                        Text(f"SENSOR {sensor_num}", size=15, weight="bold", color=Colors.CYAN_400, text_align=flet.TextAlign.CENTER),
+                        ot_slider,
+                        ct_slider,
+                    ], spacing=2, horizontal_alignment=flet.CrossAxisAlignment.CENTER),
+                    bgcolor="#252525",
+                    border_radius=10,
+                    border=flet.border.all(1, Colors.BLUE_GREY_700),
+                    padding=15,
+                    expand=True
+                )
+            
+            # All 4 sensors in one row
+            sensors_row = Row([
+                create_sensor_group(1), 
+                create_sensor_group(2), 
+                create_sensor_group(3), 
+                create_sensor_group(4)
+            ], spacing=15)
+            
+            # Other settings
+            other_sliders = []
+            for label, min_val, max_val, key, def_val in [
+                ("MAX SPEED [%]", 10, 100, "max_speed", 100),
+                ("IDLE TIMEOUT [s]", 0, 600, "idle_timeout", 300),
+                ("SOLENOID ON TIME [s]", 0, 10, "mag_time", 2)
+            ]:
+                start_val = self.global_settings_data.get(key, def_val)
+                val_txt = Text(str(int(start_val)), color="white", size=14, weight="bold")
+                
+                def on_change_other(e, v_txt=val_txt, setting_key=key):
+                    val = int(e.control.value)
+                    v_txt.value = str(val)
+                    v_txt.update()
+                    self.global_settings_data[setting_key] = val
+                    
+                def on_release_other(e):
+                    self._save_global_settings()
+                
+                slider = Slider(min=min_val, max=max_val, value=start_val, label="{value}",
+                               active_color=Colors.CYAN_400, expand=True,
+                               on_change=on_change_other, on_change_end=on_release_other)
+                other_sliders.append(Row(controls=[
+                    Text(label, color="white", size=13, weight="bold", width=150),
+                    slider,
+                    Container(content=val_txt, width=60, height=32, bgcolor=Colors.BLUE_GREY_800,
+                             border_radius=5, border=flet.border.all(1, Colors.BLUE_GREY_600), alignment=alignment.center)
+                ], spacing=10, height=40))
+            
+            other_settings_container = Container(
+                content=Column([
+                    Row([
+                        flet.Icon(flet.Icons.TUNE, size=20, color=Colors.CYAN_400),
+                        Text("Other Settings", size=14, weight="bold", color=Colors.CYAN_400)
+                    ], spacing=8),
+                    Column(controls=other_sliders, spacing=10),
+                ], spacing=10),
+                bgcolor="#252525",
+                border_radius=8,
+                border=flet.border.all(1, Colors.BLUE_GREY_700),
+                padding=15,
+            )
+            
+            # Buttons moved to top (smaller)
+            action_buttons = Row([
+                ElevatedButton("DEFAULT", height=32, width=100,
+                              style=flet.ButtonStyle(bgcolor=Colors.RED_700, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=6)), 
+                              on_click=self._restore_global_defaults),
+                ElevatedButton("Send & Save", height=32, width=130,
+                              style=flet.ButtonStyle(bgcolor=Colors.GREEN_700, color=Colors.WHITE, shape=flet.RoundedRectangleBorder(radius=6)), 
+                              on_click=self._send_global_settings)
+            ], spacing=10)
+            
+            return Column(controls=[
+                # Header with buttons
+                Row([
+                    Row([
+                        flet.Icon(flet.Icons.SETTINGS, size=28, color=Colors.CYAN_400),
+                        Text("GLOBAL SETTINGS", size=20, weight="bold", color="white"),
+                    ], spacing=10),
+                    Container(expand=True), # Spacer to push buttons to right
+                    action_buttons
+                ], alignment=MainAxisAlignment.SPACE_BETWEEN),
+                
+                flet.Divider(color=Colors.BLUE_GREY_700, height=5),
+
+                # Temperature sensors row
+                sensors_row,
+                
+                # Other settings
+                other_settings_container,
+                
+            ], spacing=15, expand=True)
 
         else:
             # --- WIDOK CHWYTAKÓW ---

@@ -53,6 +53,10 @@ def main(page: ft.Page):
     COLOR_RAMKA_GLOWNA = "#2D2D2D" 
     COLOR_OBRYSOW = "#555555" 
     
+
+
+    # ... (Styles defined previously, keeping definitions clean)
+    
     STYL_RAMKI = {
         "bgcolor": COLOR_RAMKA_GLOWNA,
         "border_radius": 10,
@@ -122,7 +126,12 @@ def main(page: ft.Page):
             dd_ports.disabled = False
             
             if "STATUS" in views and views["STATUS"]:
-                views["STATUS"].update_status("Stan połączenia", "Rozłączono", ft.Colors.GREY_400)
+                views["STATUS"].update_status("CONN_STAT", "DISCONNECTED", ft.Colors.GREY_400)
+                views["STATUS"].update_status("PORT_NAME", "None", ft.Colors.GREY_400)
+            
+            # Log disconnect to errors
+            if "ERRORS" in views and views["ERRORS"]:
+                views["ERRORS"].handle_error_code("DIS")
                 
         else:
             selected_port = dd_ports.value
@@ -134,7 +143,12 @@ def main(page: ft.Page):
                     dd_ports.disabled = True
                     
                     if "STATUS" in views and views["STATUS"]:
-                        views["STATUS"].update_status("Stan połączenia", "Połączono", ft.Colors.GREEN_400)
+                        views["STATUS"].update_status("CONN_STAT", "CONNECTED", ft.Colors.GREEN_400)
+                        views["STATUS"].update_status("PORT_NAME", selected_port, ft.Colors.BLUE_400)
+                    
+                    # Log connect to errors
+                    if "ERRORS" in views and views["ERRORS"]:
+                        views["ERRORS"].handle_error_code("CON")
 
                     def delayed_sync():
                         print("Czekam na start STM32...")
@@ -252,26 +266,186 @@ def main(page: ft.Page):
     )
     
     # --- INICJALIZACJA WIDOKÓW ---
+
+    # 2. ŚRODEK (Przeniesione tutaj, aby było dostępne dla helperów)
+    frame_middle = ft.Container(
+        content=None, 
+        expand=1,
+        **STYL_RAMKI 
+    )
+    
+    # Zmienne globalne dla obsługi błędów
+    footer_buttons_map = {} 
+    current_alert_level = "NONE"
+
+    # Zmienne globalne do animacji
+    animation_thread = None
+    stop_animation = False
+
+    def animate_button_loop():
+        nonlocal stop_animation
+        error_btn = footer_buttons_map.get("ERRORS")
+        if not error_btn: return
+
+        print("[MAIN DEBUG] Starting animation loop")
+        state_toggle = False
+        
+        while not stop_animation and current_alert_level != "NONE":
+            # Wybór koloru bazowego
+            if current_alert_level == "ERROR":
+                color_on = ft.Colors.RED_500
+                color_off = ft.Colors.RED_900 if page.theme_mode == ft.ThemeMode.DARK else ft.Colors.RED_100
+                width = 4
+            elif current_alert_level == "WARNING":
+                color_on = ft.Colors.YELLOW_500
+                color_off = ft.Colors.YELLOW_900 if page.theme_mode == ft.ThemeMode.DARK else ft.Colors.YELLOW_100
+                width = 4
+            else:
+                break
+            
+            # Animacja pulsowania (zmiana koloru ramki)
+            current_color = color_on if state_toggle else color_off
+            
+            error_btn.style.side = ft.BorderSide(width, current_color)
+            
+            try:
+                error_btn.update()
+            except:
+                break # Wyjście jeśli np. okno zamknięte
+                
+            state_toggle = not state_toggle
+            time.sleep(0.5) # Częstotliwość pulsowania
+            
+        # Po zakończeniu pętli - czyścimy styl
+        print("[MAIN DEBUG] Stopping animation loop")
+        error_btn.style.side = ft.BorderSide(0, ft.Colors.TRANSPARENT)
+        try:
+            error_btn.update()
+        except: pass
+
+    def update_error_button_style(level):
+        # Ta funkcja teraz tylko zarządza wątkiem animacji
+        nonlocal animation_thread, stop_animation
+        
+        # Pobieramy przycisk dynamicznie ze mapy
+        error_btn = footer_buttons_map.get("ERRORS")
+        if not error_btn: 
+            print("[MAIN DEBUG] Error button NOT FOUND during style update!")
+            return
+
+        if level == "NONE":
+            # Zatrzymujemy animację
+            stop_animation = True
+            if animation_thread and animation_thread.is_alive():
+                animation_thread.join(timeout=1.0)
+            
+            # Resetujemy styl "na sztywno" na wszelki wypadek
+            error_btn.style.side = ft.BorderSide(0, ft.Colors.TRANSPARENT)
+            error_btn.update()
+            
+        else:
+            # Uruchamiamy animację jeśli nie działa
+            if animation_thread is None or not animation_thread.is_alive():
+                stop_animation = False
+                animation_thread = threading.Thread(target=animate_button_loop, daemon=True)
+                animation_thread.start()
+            else:
+                # Jeśli wątek już działa, to pętla sama zaktualizuje kolor 
+                # na podstawie zmiennej globalnej current_alert_level
+                pass
+
+    def set_controls_locked(is_locked):
+        """Blokuje/Odblokowuje widoki sterowania"""
+        if "JOG" in views:
+            if hasattr(views["JOG"], "set_locked"):
+                views["JOG"].set_locked(is_locked)
+            else:
+                views["JOG"].disabled = is_locked 
+                
+        if "CARTESIAN" in views:
+            if hasattr(views["CARTESIAN"], "set_locked"):
+                views["CARTESIAN"].set_locked(is_locked)
+            else:
+                views["CARTESIAN"].disabled = is_locked 
+                
+        # Wymuś update widoku środkowego
+        if frame_middle.page:
+            frame_middle.update()
+
+    # Callback do zmiany stanu błędu - WŁAŚCIWY
+    def update_global_error_state(level):
+        print(f"[MAIN DEBUG] update_global_error_state called with: {level}")
+        nonlocal current_alert_level
+        
+        if level == "ERROR":
+            current_alert_level = "ERROR"
+            set_controls_locked(True) # BLOKADA STEROWANIA
+        elif level == "WARNING":
+            if current_alert_level != "ERROR":
+                current_alert_level = "WARNING"
+                set_controls_locked(False) 
+        elif level == "NONE":
+            current_alert_level = "NONE"
+            set_controls_locked(False) # ODBLOKOWANIE STEROWANIA
+            
+            # Reset wartości "Motor Connected" w zakładce Status na True
+            # ponieważ Error Reset oznacza, że zakładamy, że wszystko jest naprawione
+            if "STATUS" in views and views["STATUS"]:
+                for i in range(1, 7):
+                    views["STATUS"].update_status(f"M{i}_CONN", "True", ft.Colors.GREEN_400)
+            
+        update_error_button_style(current_alert_level)
+
     
     def global_status_updater(key, value, color=None):
         if "STATUS" in views and views["STATUS"]:
             views["STATUS"].update_status(key, value, color)
 
-    # Inicjalizujemy widoki
+    def global_error_handler(error_code):
+        """Funkcja obsługująca błędy z widoków JOG/CARTESIAN"""
+        if "ERRORS" in views and views["ERRORS"]:
+            views["ERRORS"].send_error_code(error_code)
+
+    # --- SHARED STATE CALLBACKS ---
+    def global_set_homed(is_homed):
+        """Set homing status for ALL views at once"""
+        print(f"[MAIN] global_set_homed called: {is_homed}")
+        if "JOG" in views and views["JOG"]:
+            views["JOG"].set_homed_status(is_homed)
+        if "CARTESIAN" in views and views["CARTESIAN"]:
+            views["CARTESIAN"].set_homed_status(is_homed)
+        if "SETTINGS" in views and views["SETTINGS"]:
+            views["SETTINGS"].set_homed_status(is_homed)
+
+    def global_sync_joints():
+        """Sync joint positions from JOG to CARTESIAN and vice versa"""
+        # Get current joints from JOG (in degrees, internal_target_values)
+        if "JOG" in views and views["JOG"] and "CARTESIAN" in views and views["CARTESIAN"]:
+            jog_joints = views["JOG"].internal_target_values
+            # Convert to radians and set to CARTESIAN
+            import numpy as np
+            cartesian_joints = [np.radians(jog_joints.get(f"J{i+1}", 0.0)) for i in range(6)]
+            views["CARTESIAN"].commanded_joints = cartesian_joints
+
+    # Inicjalizujemy widoki - ERRORS najpierw, żeby był dostępny dla innych
+    if ErrorsView:
+        # Przekazujemy callback do ErrorsView
+        views["ERRORS"] = ErrorsView(uart_communicator=communicator, on_status_change=update_global_error_state)
     if JogView:
-        views["JOG"] = JogView(uart_communicator=communicator, on_status_update=global_status_updater)
+        views["JOG"] = JogView(uart_communicator=communicator, on_status_update=global_status_updater, on_error=global_error_handler)
+        views["JOG"].on_global_set_homed = global_set_homed  # Add callback
     if CartesianView:
         views["CARTESIAN"] = CartesianView(
             urdf_path="resources/PAROL6.urdf",
-            active_links_mask=[False, True, True, True, True, True, True],
-            uart_communicator=communicator
+            active_links_mask=[False, True, True, True, True, True, True, False],
+            uart_communicator=communicator,
+            on_error=global_error_handler
         )
+        views["CARTESIAN"].on_global_set_homed = global_set_homed  # Add callback
     if SettingsView:
         views["SETTINGS"] = SettingsView(uart_communicator=communicator)
     if StatusView:
-        views["STATUS"] = StatusView()  
-    if ErrorsView:
-        views["ERRORS"] = ErrorsView()
+        views["STATUS"] = StatusView()
 
     def handle_uart_data(data_string):
             """
@@ -300,10 +474,21 @@ def main(page: ft.Page):
                         print("[MAIN] Wymuszono zamknięcie dialogu w JOG przez ESTOP")
                     except Exception as e:
                         print(f"Błąd zamykania dialogu JOG: {e}")
+                
+                # 3. Reset dla CARTESIAN
+                if "CARTESIAN" in views and views["CARTESIAN"]:
+                    try:
+                        views["CARTESIAN"].set_homed_status(False)
+                    except Exception as e:
+                         print(f"Błąd resetu CARTESIAN: {e}")
 
                 # 3. Pokaż czerwoną nakładkę ESTOP
                 estop_overlay.visible = True
                 page.update()
+                
+                # 4. Log E2 error for ESTOP
+                if "ERRORS" in views and views["ERRORS"]:
+                    views["ERRORS"].handle_error_code("E2")
                 
                 return
             
@@ -330,8 +515,15 @@ def main(page: ft.Page):
                 if "JOG" in views and views["JOG"]:
                     print("[MAIN DEBUG] Znalazłem widok JOG, wywołuję set_homed_status...")
                     views["JOG"].set_homed_status(True)
-                else:
-                    print("[MAIN DEBUG] !!! BŁĄD: Nie znaleziono widoku JOG w słowniku views !!!")
+                
+                # Debugowanie CARTESIAN
+                if "CARTESIAN" in views and views["CARTESIAN"]:
+                    print("[MAIN DEBUG] Znalazłem widok CARTESIAN, wywołuję set_homed_status...")
+                    views["CARTESIAN"].set_homed_status(True)
+                
+                # Log HMD info for homing complete
+                if "ERRORS" in views and views["ERRORS"]:
+                    views["ERRORS"].handle_error_code("HMD")
                 
                 return
 
@@ -368,9 +560,32 @@ def main(page: ft.Page):
                     views["ERRORS"].add_log("WARNING", f"Wykryto utyk: {data_string}")
                 return
 
+                if "ERRORS" in views and views["ERRORS"]:
+                    views["ERRORS"].add_log("WARNING", f"Wykryto utyk: {data_string}")
+                return
+
             # ==========================================================
-            # 4. POMPY / ZAWORY
+            # 5. HEADER ERRORS (EMM - Missing Motor)
             # ==========================================================
+            if "EMM" in data_string:
+                # Format: EMM1, EMM2...
+                try:
+                    # Find which motor
+                    import re
+                    match = re.search(r"EMM(\d)", data_string)
+                    if match:
+                        idx = match.group(1)
+                        # 1. Update Status (False / Red)
+                        if "STATUS" in views and views["STATUS"]:
+                            views["STATUS"].update_status(f"M{idx}_CONN", "False", ft.Colors.RED_400)
+                        
+                        # 2. Trigger Error (if not already triggered by generic parser)
+                        if "ERRORS" in views and views["ERRORS"]:
+                            views["ERRORS"].handle_error_code(f"EMM{idx}")
+                            
+                except Exception as e:
+                    print(f"[MAIN] Error parsing EMM: {e}")
+                return
             if "VAC_ON" in data_string:
                 if "STATUS" in views and views["STATUS"]:
                     views["STATUS"].update_status("Pompa", "WŁĄCZONA", ft.Colors.GREEN_400)
@@ -386,6 +601,96 @@ def main(page: ft.Page):
             if "VALVEOFF" in data_string:
                 if "STATUS" in views and views["STATUS"]:
                     views["STATUS"].update_status("Zawór", "OTWARTY", ft.Colors.GREEN_400)
+                return
+
+
+            # ==========================================================
+            # 7a. LIMIT SWITCHES (H=Hit/Home, R=Release)
+            # ==========================================================
+            # Format: H1, H2... (Pressed) / R1, R2... (Released)
+            if data_string.startswith("H") or data_string.startswith("R"):
+                import re
+                # Check for Hit (H1..6)
+                match_h = re.match(r"^H(\d+)$", data_string)
+                if match_h:
+                    idx = match_h.group(1)
+                    if "STATUS" in views and views["STATUS"]:
+                        views["STATUS"].update_status(f"LS{idx}", "PRESSED", ft.Colors.RED_400)
+                    return
+                
+                # Check for Release (R1..6)
+                match_r = re.match(r"^R(\d+)$", data_string)
+                if match_r:
+                    idx = match_r.group(1)
+                    if "STATUS" in views and views["STATUS"]:
+                        views["STATUS"].update_status(f"LS{idx}", "RELEASED", ft.Colors.GREEN_400)
+                    return
+
+            # ==========================================================
+            # 8. OBSŁUGA DANYCH PROT_ (Temperatury i Zasilanie)
+            # ==========================================================
+            # Format: PROT_p3v3,p5v,pok,pstat,t1,t2,t3,t4
+            if data_string.startswith("PROT_"):
+                try:
+                    content = data_string[5:] # Remove PROT_
+                    parts = content.split(',')
+                    if len(parts) >= 8:
+                        # 1. Parse Power Status
+                        p3v3 = int(parts[0])
+                        p5v = int(parts[1])
+                        pok = int(parts[2])
+                        pstat = int(parts[3])
+                        
+                        # 2. Parse Temperatures
+                        t1 = float(parts[4])
+                        t2 = float(parts[5])
+                        t3 = float(parts[6])
+                        t4 = float(parts[7])
+                        
+                        # 3. Update Status View
+                        if "STATUS" in views and views["STATUS"]:
+                            status = views["STATUS"]
+                            # Power
+                            status.update_status("PWR3V3", "OK" if p3v3 else "FAIL", ft.Colors.GREEN_400 if p3v3 else ft.Colors.RED_400)
+                            status.update_status("PWR5V", "OK" if p5v else "FAIL", ft.Colors.GREEN_400 if p5v else ft.Colors.RED_400)
+                            status.update_status("PWROK", "OK" if pok else "FAIL", ft.Colors.GREEN_400 if pok else ft.Colors.RED_400)
+                            status.update_status("PWRSTAT", str(pstat), ft.Colors.BLUE_400)
+                            
+                            # Temps
+                            status.update_status("TEMP1", f"{t1:.1f} °C", ft.Colors.ORANGE_300)
+                            status.update_status("TEMP2", f"{t2:.1f} °C", ft.Colors.ORANGE_300)
+                            status.update_status("TEMP3", f"{t3:.1f} °C", ft.Colors.ORANGE_300)
+                            status.update_status("TEMP4", f"{t4:.1f} °C", ft.Colors.ORANGE_300)
+
+                        # 4. Check Thresholds against Global Settings
+                        if "SETTINGS" in views and views["SETTINGS"] and "ERRORS" in views and views["ERRORS"]:
+                            settings = views["SETTINGS"].global_settings_data
+                            errors = views["ERRORS"]
+                            
+                            # Helper to check one sensor
+                            def check_sensor(idx, val):
+                                ot_limit = settings.get(f"sensor_{idx}_ot", 50) # Changed default to 50 to match settings.py
+                                ct_limit = settings.get(f"sensor_{idx}_ct", 90)
+                                
+                                # Debug print to console (visible to user/dev)
+                                # print(f"[DEBUG] Sensor {idx}: Val={val}, OT={ot_limit}, CT={ct_limit}")
+
+                                # Critical (CT) check
+                                if val > ct_limit:
+                                    print(f"[MAIN] !!! Critical Temp Sensor {idx}: {val} > {ct_limit}")
+                                    errors.handle_error_code(f"CT{idx}")
+                                # Warning (OT) check - only if not already critical
+                                elif val > ot_limit:
+                                    print(f"[MAIN] ! Warning Temp Sensor {idx}: {val} > {ot_limit}")
+                                    errors.handle_error_code(f"OT{idx}")
+
+                            check_sensor(1, t1)
+                            check_sensor(2, t2)
+                            check_sensor(3, t3)
+                            check_sensor(4, t4)
+
+                except Exception as e:
+                    print(f"[MAIN] Błąd parsowania PROT_: {e}")
                 return
 
             # ==========================================================
@@ -407,8 +712,8 @@ def main(page: ft.Page):
                             views["JOG"].update_joints_and_fk(joint_values)
                         
                         if "CARTESIAN" in views and views["CARTESIAN"]:
-                            if hasattr(views["CARTESIAN"], '_on_uart_data'):
-                                views["CARTESIAN"]._on_uart_data(data_string)
+                            if hasattr(views["CARTESIAN"], 'update_from_feedback'):
+                                views["CARTESIAN"].update_from_feedback(joint_values)
 
                         if "SETTINGS" in views and views["SETTINGS"]:
                             settings = views["SETTINGS"]
@@ -431,6 +736,20 @@ def main(page: ft.Page):
             if data_string.startswith("ERROR_"):
                 if "ERRORS" in views and views["ERRORS"]:
                     views["ERRORS"].add_log("ERROR", data_string[6:].strip())
+                return
+
+            # ==========================================================
+            # 7. KODY BŁĘDÓW (E1, E2, W1, W2, IKE, COM, OOR1, CT1, EMM1, STL1, NRL1, etc.)
+            # ==========================================================
+            import re
+            # Match all known error code patterns:
+            # E1-E5, W1-W2, OT1-OT4, CT1-CT4, EMM1-EMM6, IKE, OOR1-OOR6, COM, COL, OVL, GRE
+            # NRL1-NRL6, SLW, HMS, CFG, GRW, SPD, STL1-STL6, HMD, CON, DIS, RDY, PRG
+            error_code_pattern = r'^(E\d+|W\d+|OT\d+|CT\d+|EMM\d+|OOR\d+|NRL\d+|STL\d+|IKE|COM|COL|OVL|GRE|SLW|HMS|CFG|GRW|SPD|HMD|CON|DIS|RDY|PRG)$'
+            error_code_match = re.match(error_code_pattern, data_string)
+            if error_code_match:
+                if "ERRORS" in views and views["ERRORS"]:
+                    views["ERRORS"].handle_error_code(data_string)
                 return 
 
             # ==========================================================
@@ -445,12 +764,7 @@ def main(page: ft.Page):
 
     communicator.on_data_received = handle_uart_data
     
-    # 2. ŚRODEK
-    frame_middle = ft.Container(
-        content=None, 
-        expand=1,
-        **STYL_RAMKI 
-    )
+    # 2. ŚRODEK - definicja frame_middle przeniesiona wyżej
 
     # --- 3. DÓŁ (Stopka) ---
     def change_mode_clicked(e):
@@ -476,26 +790,96 @@ def main(page: ft.Page):
         ("ERRORS", "ERRORS.png")
     ]
     
+    # footer_buttons_map zdefiniowane wyżej
+    
     footer_buttons = []
+    
     for name, img_file in buttons_data:
-        footer_buttons.append(
-            ft.ElevatedButton(
-                data=name, 
-                content=ft.Image(
-                    src=img_file,
-                    height=70,
-                    fit=ft.ImageFit.CONTAIN,
-                    error_content=ft.Text(name, size=16, weight="bold", color="white") 
-                ),
-                style=ft.ButtonStyle(
-                    bgcolor="#444444",
-                    shape=ft.RoundedRectangleBorder(radius=8)
-                ),
-                height=90, 
-                expand=True, 
-                on_click=change_mode_clicked 
-            )
+        btn = ft.ElevatedButton(
+            data=name, 
+            content=ft.Image(
+                src=img_file,
+                height=70,
+                fit=ft.ImageFit.CONTAIN,
+                error_content=ft.Text(name, size=16, weight="bold", color="white") 
+            ),
+            style=ft.ButtonStyle(
+                bgcolor="#444444",
+                shape=ft.RoundedRectangleBorder(radius=8),
+                side={
+                    ft.ControlState.DEFAULT: ft.BorderSide(0, ft.Colors.TRANSPARENT),
+                }
+            ),
+            height=90, 
+            expand=True, 
+            on_click=change_mode_clicked 
         )
+        footer_buttons.append(btn)
+        footer_buttons_map[name] = btn
+
+    # Referencja do głównego przycisku błędów nie jest tu potrzebna (używamy mapy dynamicznie)
+
+    # Funkcje update_error_button_style i set_controls_locked zdefiniowane wyżej
+
+    
+    # Aktualizacja logiki kliknięcia w przycisk
+    # Musimy nadpisać change_mode_clicked aby obsłużyć reset WARNING
+    
+    def wrapped_change_mode_clicked(e):
+        mode_name = e.control.data
+        
+        # Jeśli wchodzimy w ERRORS i mamy WARNING -> Resetujemy do NONE
+        if mode_name == "ERRORS":
+            nonlocal current_alert_level
+            if current_alert_level == "WARNING":
+                # Resetujemy stan wizualny, ale ErrorsView nadal ma historię
+                update_global_error_state("NONE")
+        
+        # --- SYNC JOINTS WHEN SWITCHING BETWEEN JOG AND CARTESIAN ---
+        # Both views now use URDF-based kinematics - NO sign inversion needed!
+        import numpy as np
+        
+        if mode_name == "CARTESIAN" and "JOG" in views and views["JOG"] and "CARTESIAN" in views and views["CARTESIAN"]:
+            # Sync from JOG to CARTESIAN: direct conversion (degrees to radians)
+            # Only sync if JOG has valid data to avoid overwriting with zeros
+            if views["JOG"].initial_sync_done:
+                jog_joints = views["JOG"].internal_target_values
+                cartesian_joints = [np.radians(jog_joints.get(f"J{i+1}", 0.0)) for i in range(6)]
+                views["CARTESIAN"].commanded_joints = cartesian_joints
+            # print(f"[MAIN] Synced JOG -> CARTESIAN: {cartesian_joints}")
+            
+        elif mode_name == "JOG" and "CARTESIAN" in views and views["CARTESIAN"] and "JOG" in views and views["JOG"]:
+            # Sync from CARTESIAN to JOG: direct conversion (radians to degrees)
+            cartesian_joints = views["CARTESIAN"].commanded_joints
+            for i in range(6):
+                deg_val = np.degrees(cartesian_joints[i])
+                views["JOG"].internal_target_values[f"J{i+1}"] = deg_val
+                views["JOG"].current_raw_values[f"J{i+1}"] = deg_val  # Also update DISPLAY source!
+            views["JOG"].initial_sync_done = True  # Mark as synced
+            # Trigger display update
+            views["JOG"]._calculate_forward_kinematics()
+            if views["JOG"].page:
+                views["JOG"].page.update()
+            # print(f"[MAIN] Synced CARTESIAN -> JOG: {views['JOG'].internal_target_values}")
+        
+        # Wywołanie oryginalnej logiki zmiany widoku
+        # Skopiowana logika change_mode (prościej niż wywoływać funkcję z wrapper)
+        current_mode_text.value = mode_name
+        
+        if mode_name in views:
+            frame_middle.content = views[mode_name]
+        else:
+            frame_middle.content = ft.Text(f"Brak widoku: {mode_name}", size=30, color="red")
+            
+        if mode_name == "SETTINGS" and "SETTINGS" in views:
+            views["SETTINGS"].reset_view()
+        
+        frame_middle.alignment = ft.alignment.center
+        page.update()
+
+    # Podmieniamy handler w przyciskach
+    for btn in footer_buttons:
+        btn.on_click = wrapped_change_mode_clicked
 
     frame_bottom = ft.Container(
         content=ft.Row(controls=footer_buttons, spacing=10), 
