@@ -58,6 +58,8 @@ class SettingsView(flet.Container):
         # SGGRIP Tuning
         self.egrip_tuning_dialog = None
         self.egrip_sg_result_text = Text("-", size=40, weight="bold", color=Colors.CYAN_300)
+        self.egrip_chart = None
+        self.egrip_chart_data_points = []
 
         # --- ROBOT SLIDER CONFIGURATION ---
         self.slider_set_definitions = {
@@ -221,33 +223,21 @@ class SettingsView(flet.Container):
                 self.stall_status_container.update()
             return
 
-        # 4. CHWYTAK (EGRIP)
-        if "SG: " in clean_str:
+        # 4. CHWYTAK (EGRIP) - format: EGRIP_SR_wartość
+        if "EGRIP_SR_" in clean_str:
             try:
-                val = clean_str.split("_")[1].strip()
-                if (self.egrip_tuning_dialog and self.egrip_tuning_dialog.open and self.egrip_sg_result_text.page):
-                    self.egrip_sg_result_text.value = val
-                    self.egrip_sg_result_text.update()
-            except: pass
-            return
-        # 3. KOLIZJA
-        if "COLLISION" in clean_str and current_motor_tag in clean_str:
-            if hasattr(self, 'stall_status_text') and self.stall_status_text.page:
-                self.stall_status_text.value = f"⚠️ KOLIZJA!"
-                self.stall_status_text.color = "white"
-                self.stall_status_text.update()
-            if hasattr(self, 'stall_status_container') and self.stall_status_container.page:
-                self.stall_status_container.bgcolor = ft.Colors.RED_900
-                self.stall_status_container.border = ft.border.all(2, ft.Colors.RED_400)
-                self.stall_status_container.update()
-            return
-
-        # 4. CHWYTAK
-        if "EGRIPSGRESULT_" in clean_str:
-            try:
-                val = clean_str.split("_")[1].strip()
-                if (self.egrip_tuning_dialog and self.egrip_tuning_dialog.open and self.egrip_sg_result_text.page):
-                    self.egrip_sg_result_text.value = val
+                val = int(clean_str.split("_")[2].strip())
+                # Aktualizuj wykres
+                if (self.egrip_tuning_dialog and self.egrip_tuning_dialog.open and 
+                    self.egrip_chart and self.egrip_chart_data_points):
+                    # Shift danych wykresu
+                    for i in range(len(self.egrip_chart_data_points) - 1):
+                        self.egrip_chart_data_points[i].y = self.egrip_chart_data_points[i+1].y
+                    self.egrip_chart_data_points[-1].y = val
+                    self.egrip_chart.update()
+                # Aktualizuj tekst
+                if self.egrip_sg_result_text.page:
+                    self.egrip_sg_result_text.value = str(val)
                     self.egrip_sg_result_text.update()
             except: pass
             return
@@ -454,33 +444,121 @@ class SettingsView(flet.Container):
 
 
     def _open_egrip_tuning(self, e):
-        if len(self.current_gripper_values) < 4: return
-        current_sens = self.current_gripper_values[3]
+        # Pobierz wartości chwytaka (min 5 elementów)
+        vals = self.gripper_settings_data.get("SGrip", [10, 20, 5000, 0, 10])
+        while len(vals) < 5:
+            vals.append(10 if len(vals) == 4 else 0)
+        self.current_gripper_values = vals
+        
+        current_force = vals[3]  # Grip Force / Sensitivity
+        current_thrs = vals[4]   # SGT_THRS
+        
         self.egrip_sg_result_text.value = "-"
-        sens_label = Text(str(int(current_sens)), size=20, weight="bold")
+        force_label = Text(str(int(current_force)), size=18, weight="bold", color=Colors.ORANGE_400)
+        thrs_label = Text(str(int(current_thrs)), size=18, weight="bold", color=Colors.RED_400)
 
-        def on_egrip_slider_change(e):
+        # Inicjalizacja danych wykresu (50 punktów)
+        self.egrip_chart_data_points = [ft.LineChartDataPoint(i, 0) for i in range(50)]
+        self.egrip_threshold_points = [ft.LineChartDataPoint(i, current_thrs) for i in range(50)]
+        
+        # Tworzenie wykresu z linią progową
+        self.egrip_chart = ft.LineChart(
+            data_series=[
+                ft.LineChartData(
+                    data_points=self.egrip_chart_data_points, 
+                    stroke_width=3, 
+                    color=ft.Colors.CYAN, 
+                    curved=True, 
+                    stroke_cap_round=True
+                ),
+                ft.LineChartData(
+                    data_points=self.egrip_threshold_points, 
+                    stroke_width=2, 
+                    color=ft.Colors.RED, 
+                    dash_pattern=[5, 5]
+                ),
+            ],
+            border=ft.border.all(1, ft.Colors.GREY_800),
+            left_axis=ft.ChartAxis(
+                labels_size=40, 
+                title=ft.Text("SG"), 
+                title_size=20,
+                labels=[
+                    ft.ChartAxisLabel(value=0, label=ft.Text("0", size=10)),
+                    ft.ChartAxisLabel(value=500, label=ft.Text("500", size=10)),
+                    ft.ChartAxisLabel(value=1024, label=ft.Text("1024", size=10, color="yellow")),
+                ]
+            ),
+            bottom_axis=ft.ChartAxis(labels_size=0),
+            min_y=0, max_y=1050, min_x=0, max_x=49,
+            expand=True,
+            tooltip_bgcolor=ft.Colors.with_opacity(0.8, ft.Colors.BLACK),
+        )
+
+        def on_force_slider_change(e):
             val = int(e.control.value)
-            sens_label.value = str(val); sens_label.update()
+            force_label.value = str(val); force_label.update()
             self.current_gripper_values[3] = val
             v_str = ",".join(map(str, self.current_gripper_values))
             if self.comm: self.comm.send_message(f"OT,SGrip,{v_str}\r\n")
 
-        slider = Slider(min=-64, max=63, value=current_sens, label="{value}", active_color=Colors.ORANGE_400, on_change=on_egrip_slider_change)
+        def on_thrs_slider_change(e):
+            val = int(e.control.value)
+            thrs_label.value = str(val); thrs_label.update()
+            self.current_gripper_values[4] = val
+            # Aktualizuj linię progową na wykresie
+            if self.egrip_chart and self.egrip_threshold_points:
+                for p in self.egrip_threshold_points: p.y = val
+                self.egrip_chart.update()
+            v_str = ",".join(map(str, self.current_gripper_values))
+            if self.comm: self.comm.send_message(f"OT,SGrip,{v_str}\r\n")
+
+        force_slider = Slider(min=-64, max=63, value=current_force, label="{value}", 
+                             active_color=Colors.ORANGE_400, on_change=on_force_slider_change)
+        thrs_slider = Slider(min=0, max=200, value=current_thrs, label="{value}", divisions=200,
+                            active_color=Colors.RED_400, on_change=on_thrs_slider_change)
+        
         btn_style = flet.ButtonStyle(shape=flet.RoundedRectangleBorder(radius=8), padding=15)
         ctrl_buttons = Row([
-            ElevatedButton("OPEN", icon=Icons.FOLDER_OPEN, bgcolor=Colors.BLUE_700, color="white", style=btn_style, on_click=lambda _: self._send_egrip_cmd("EGRIP_OPEN")),
+            ElevatedButton("OPEN",  bgcolor=Colors.BLUE_700, color="white", style=btn_style, on_click=lambda _: self._send_egrip_cmd("EGRIP_OPEN")),
             ElevatedButton("STOP", icon=Icons.STOP_CIRCLE, bgcolor=Colors.RED_700, color="white", style=btn_style, on_click=lambda _: self._send_egrip_cmd("EGRIP_STOP")),
-            ElevatedButton("CLOSE", icon=Icons.FOLDER, bgcolor=Colors.BLUE_700, color="white", style=btn_style, on_click=lambda _: self._send_egrip_cmd("EGRIP_CLOSE")),
+            ElevatedButton("CLOSE", bgcolor=Colors.BLUE_700, color="white", style=btn_style, on_click=lambda _: self._send_egrip_cmd("EGRIP_CLOSE")),
         ], alignment=MainAxisAlignment.CENTER, spacing=20)
 
+        dialog_content = Column([
+            Text("Wykres obciążenia (Live):", size=14, color="#888"),
+            Container(
+                content=self.egrip_chart, 
+                height=150,
+                padding=ft.padding.only(left=5, top=5, right=10, bottom=5), 
+                bgcolor="#222", 
+                border_radius=10
+            ),
+            ft.Divider(color="#444", height=2),
+            Row([
+                Text("Aktualna wartość SG:", size=14), 
+                self.egrip_sg_result_text
+            ], alignment=MainAxisAlignment.SPACE_BETWEEN),
+            ft.Divider(color="#444", height=2),
+            Row([Text("Grip Force (Sensitivity):", size=13, color=Colors.ORANGE_400), force_label], alignment=MainAxisAlignment.SPACE_BETWEEN), 
+            force_slider,
+            Row([Text("SGT_THRS (Threshold):", size=13, color=Colors.RED_400), thrs_label], alignment=MainAxisAlignment.SPACE_BETWEEN), 
+            thrs_slider, 
+            ft.Divider(color="#444", height=2), 
+            Text("Manual Control:", size=13, color="#888"), 
+            ctrl_buttons
+        ], spacing=5, scroll=ScrollMode.AUTO)
+
+        def close_and_save(e):
+            # Zapisz przed zamknięciem
+            self.gripper_settings_data["SGrip"] = list(self.current_gripper_values)
+            self._save_gripper_settings()
+            self.page.close(self.egrip_tuning_dialog)
+
         self.egrip_tuning_dialog = AlertDialog(
-            title=Text("SGGRIP Tuning (Vertical Gripper)"),
-            content=Container(width=450, height=400, content=Column([
-                Container(padding=20, bgcolor="#222", border_radius=10, alignment=alignment.center, content=Column([Text("SG RESULT", size=14, color="#888"), self.egrip_sg_result_text], horizontal_alignment=ft.CrossAxisAlignment.CENTER)),
-                ft.Divider(), Row([Text("Sensitivity:", size=16), sens_label], alignment=MainAxisAlignment.SPACE_BETWEEN), slider, ft.Divider(), Text("Manual Control:", size=14, color="#888"), ctrl_buttons
-            ], spacing=15)),
-            actions=[ft.TextButton("Close", on_click=lambda e: self.page.close(self.egrip_tuning_dialog))]
+            title=Text("Electric Gripper Tuning"),
+            content=Container(width=550, height=650, content=dialog_content),
+            actions=[ft.TextButton("Close & Save", on_click=close_and_save)]
         )
         self.page.open(self.egrip_tuning_dialog)
         self.page.update()
@@ -770,7 +848,7 @@ class SettingsView(flet.Container):
     def _get_default_gripper_settings(self):
         return {
             "VGrip": [-40, -20, 1],
-            "SGrip": [10, 20, 5000, 0]
+            "SGrip": [10, 20, 5000, 0, 10]  # IHOLD, IRUN, Speed, Force (Sensitivity), SGT_THRS
         }
 
 
@@ -874,8 +952,9 @@ class SettingsView(flet.Container):
             vals = self.gripper_settings_data.get("VGrip", [-40, -20, 1])
             return { "title": "ROTARY GRIPPER", "image": "Gripper1.png", "sliders": [("Pump On Pressure [kPa]", -50, -10, vals[0]), ("Pump Off Pressure [kPa]", -40, 0, vals[1]), ("Valve Delay [s]", 0, 3, vals[2])] }
         elif image_name == "render3.png": 
-            vals = self.gripper_settings_data.get("SGrip", [10, 20, 5000, 0])
-            return { "title": "VERTICAL GRIPPER", "image": "Gripper2.png", "sliders": [("IHOLD", 0, 31, vals[0]), ("IRUN", 0, 31, vals[1]), ("Grip Speed", 200, 100000, vals[2]), ("Grip Force", -63, 63, vals[3])] }
+            vals = self.gripper_settings_data.get("SGrip", [10, 20, 5000, 0, 10])
+            # Usunięto Grip Force i SGT_THRS - teraz są w oknie TUNING
+            return { "title": "ELECTRIC GRIPPER", "image": "Gripper2.png", "sliders": [("IHOLD", 0, 31, vals[0]), ("IRUN", 0, 31, vals[1]), ("Grip Speed", 200, 100000, vals[2])] }
         return None
 
     def _create_detail_view(self, image_name: str):

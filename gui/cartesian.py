@@ -17,8 +17,8 @@ ROBOT_TOOLS = {
     },
     
     "CHWYTAK_DUZY": {
-        "translation": [0.0, 0.0, 0.0],
-        "orientation": [0.0, 0.0, 0.0]
+        "translation": [0.0, 0.0, -0.18831],  # Z: -188.31mm
+        "orientation": [0.0, -90.0, 0.0]       # Rotation around Y: -90 degrees
     }
 }
 
@@ -254,11 +254,11 @@ class CartesianView(flet.Container):
         # ----------------------------------------------------------------------
         # 1. LEFT COLUMN: AXIS CONTROLS
         # ----------------------------------------------------------------------
-        # Match JogView: A=Roll(X), B=Pitch(Y), C=Yaw(Z)
+        # Match JogView: A=Roll(X), B=Yaw(Z), C=Pitch(Y) - swapped B/C to match display
         axes_list = [
             ("X Axis", "x"), ("A (Rot X)", "rx"),
-            ("Y Axis", "y"), ("B (Rot Y)", "ry"),
-            ("Z Axis", "z"), ("C (Rot Z)", "rz")
+            ("Y Axis", "y"), ("B (Rot Z)", "rz"),
+            ("Z Axis", "z"), ("C (Rot Y)", "ry")
         ]
 
         # Use Grid-like structure (Rows of 2)
@@ -379,6 +379,7 @@ class CartesianView(flet.Container):
         except: pass
         
     def _update_loop(self):
+        while self.alive:
             # Fallback: Force sync IF AND ONLY IF we are purely stationary and data has arrived
             # This handles the initial connection sync without interrupting movements.
             if not self.is_jogging:
@@ -601,7 +602,126 @@ class CartesianView(flet.Container):
         if self.uart: self.uart.send_message("EGRIP_STOP")
 
     def on_change_tool_click(self, e):
-        if self.uart: self.uart.send_message("TOOL_CHANGE")
+        """Shows tool selection dialog with images."""
+        if not self.page: return
+        
+        self.tool_change_dialog = None
+        
+        def close_dlg(e=None):
+            if self.tool_change_dialog:
+                self.page.close(self.tool_change_dialog)
+                self.page.update()
+        
+        def select_vacuum(e):
+            if hasattr(self, 'on_global_set_tool') and self.on_global_set_tool:
+                self.on_global_set_tool("CHWYTAK_MALY")
+            else:
+                self.ik.set_tool("CHWYTAK_MALY")
+            if self.uart: self.uart.send_message("TOOL_VAC")
+            close_dlg()
+            self._update_labels_logic()
+            self.page.snack_bar = flet.SnackBar(flet.Text("Active Tool: Vacuum Gripper"), bgcolor=flet.Colors.GREEN)
+            self.page.snack_bar.open = True
+            self.page.update()
+        
+        def select_electric(e):
+            if hasattr(self, 'on_global_set_tool') and self.on_global_set_tool:
+                self.on_global_set_tool("CHWYTAK_DUZY")
+            else:
+                self.ik.set_tool("CHWYTAK_DUZY")
+            if self.uart: self.uart.send_message("TOOL_EGRIP")
+            close_dlg()
+            self._update_labels_logic()
+            self.page.snack_bar = flet.SnackBar(flet.Text("Active Tool: Electric Gripper"), bgcolor=flet.Colors.GREEN)
+            self.page.snack_bar.open = True
+            self.page.update()
+        
+        # Create clickable tool panels
+        panel_style = {
+            "bgcolor": "#3D3D3D",
+            "border_radius": 10,
+            "border": flet.border.all(2, "#555555"),
+            "padding": 10,
+            "width": 220,
+            "height": 210,
+            "alignment": flet.alignment.center,
+        }
+        
+        def make_hover_effect(container, on_click_func):
+            def on_hover(e):
+                if e.data == "true":
+                    container.border = flet.border.all(3, flet.Colors.CYAN_400)
+                    container.bgcolor = "#4D4D4D"
+                else:
+                    container.border = flet.border.all(2, "#555555")
+                    container.bgcolor = "#3D3D3D"
+                container.update()
+            container.on_hover = on_hover
+            container.on_click = on_click_func
+        
+        vacuum_panel = flet.Container(
+            content=flet.Column([
+                flet.Image(src="Gripper1.png", height=160, fit=flet.ImageFit.CONTAIN),
+                flet.Text("Vacuum Gripper", size=15, weight="bold", color="white", text_align=flet.TextAlign.CENTER)
+            ], horizontal_alignment=flet.CrossAxisAlignment.CENTER, spacing=8),
+            **panel_style
+        )
+        make_hover_effect(vacuum_panel, select_vacuum)
+        
+        electric_panel = flet.Container(
+            content=flet.Column([
+                flet.Image(src="Gripper2.png", height=160, fit=flet.ImageFit.CONTAIN),
+                flet.Text("Electric Gripper", size=15, weight="bold", color="white", text_align=flet.TextAlign.CENTER)
+            ], horizontal_alignment=flet.CrossAxisAlignment.CENTER, spacing=8),
+            **panel_style
+        )
+        make_hover_effect(electric_panel, select_electric)
+        
+        tools_row = flet.Row([
+            vacuum_panel,
+            electric_panel
+        ], spacing=30, alignment=flet.MainAxisAlignment.CENTER)
+        
+        def on_change_click(e):
+            if self.uart: self.uart.send_message("TOOL_CHANGE")
+            self.page.snack_bar = flet.SnackBar(flet.Text("Tool change command sent"), bgcolor=flet.Colors.BLUE)
+            self.page.snack_bar.open = True
+            self.page.update()
+        
+        change_button = flet.ElevatedButton(
+            "CHANGE",
+            icon=flet.Icons.SWAP_HORIZ,
+            style=flet.ButtonStyle(
+                bgcolor=flet.Colors.ORANGE_700,
+                color="white",
+                shape=flet.RoundedRectangleBorder(radius=10)
+            ),
+            height=60,
+            width=300,
+            on_click=on_change_click
+        )
+        
+        dialog_content = flet.Column([
+            tools_row,
+            flet.Container(height=40),
+            flet.Container(content=change_button, alignment=flet.alignment.center)
+        ], horizontal_alignment=flet.CrossAxisAlignment.CENTER, spacing=0)
+        
+        title_row = flet.Row([
+            flet.Text("CHANGE ACTIVE TOOL", size=22, weight="bold", color="white"),
+            flet.IconButton(icon=flet.Icons.CLOSE, icon_size=28, on_click=close_dlg)
+        ], alignment=flet.MainAxisAlignment.SPACE_BETWEEN)
+        
+        self.tool_change_dialog = flet.AlertDialog(
+            title=title_row,
+            title_padding=flet.padding.only(left=20, right=10, top=10, bottom=0),
+            content=flet.Container(content=dialog_content, padding=10, width=520, height=310),
+            modal=True,
+            bgcolor="#2D2D2D"
+        )
+        
+        self.page.open(self.tool_change_dialog)
+        self.page.update()
 
     def _ui_updater_loop(self):
         while self.alive:
@@ -634,10 +754,10 @@ class CartesianView(flet.Container):
             self.lbl_cart["Y"].value = f"{pos[1]*1000:.2f} mm"
             self.lbl_cart["Z"].value = f"{pos[2]*1000:.2f} mm"
             
-            # Rotation in degrees (A=euler[0], B=euler[1], C=euler[2])
+            # Rotation in degrees (A=Roll, B=Yaw, C=Pitch - swapped to match buttons)
             self.lbl_cart["A"].value = f"{euler[0]:.2f}°"
-            self.lbl_cart["B"].value = f"{euler[1]:.2f}°"
-            self.lbl_cart["C"].value = f"{euler[2]:.2f}°"
+            self.lbl_cart["B"].value = f"{euler[2]:.2f}°"
+            self.lbl_cart["C"].value = f"{euler[1]:.2f}°"
 
             # Update Joint displays - use commanded values
             for i, rad_val in enumerate(self.commanded_joints):
@@ -654,7 +774,7 @@ class CartesianView(flet.Container):
         # Mały krok (2.0mm) + Mało iteracji (5) = Płynność
         # 2.0mm * 20Hz = 40mm/s (nieco wolniej, ale stabilnie)
         BASE_STEP_MM = 2.0
-        BASE_STEP_RAD = 0.012  # Reduced 7x (old 10% = new 70%) for smoother rotation control
+        BASE_STEP_RAD = 0.006  # Smaller step for rotation stability near singularities
         
         # Workspace limits (Expanded for pure URDF exploration)
         WORKSPACE_LIMITS = {
@@ -732,15 +852,15 @@ class CartesianView(flet.Container):
                     diffs = [abs(nj_model[i] - current_raw[i]) for i in range(6)]
                     max_diff = max(diffs)
                     
-                    # If jump is too large, we're likely near singularity - skip this step
-                    if max_diff < 0.5:  # ~28 degrees - safe movement
+                    # Tighter thresholds for rotation stability
+                    if max_diff < 0.3:  # ~17 degrees - safe movement
                         self.commanded_joints = nj_model
-                    elif max_diff < 1.0:  # Moderate jump - interpolate to reduce jerk
-                        # Blend: 30% new, 70% old - smooth transition near singularity
-                        blend_factor = 0.3
+                    elif max_diff < 0.6:  # Moderate jump - interpolate to reduce jerk
+                        # Blend: 20% new, 80% old - smoother transition near singularity
+                        blend_factor = 0.2
                         blended = [current_raw[i] + blend_factor * (nj_model[i] - current_raw[i]) for i in range(6)]
                         self.commanded_joints = blended
-                    # else: Large jump - reject completely (no print)
+                    # else: Large jump - reject completely (singularity protection)
                         
                 except:
                     pass  # IK error - silently skip

@@ -158,10 +158,9 @@ class JogView(flet.Container):
             if not self.initial_sync_done:
                 self.internal_target_values[k] = v
             
-            # Display calculated/commanded value (internal_target_values)
+            # Display actual feedback value from robot (inverted sign for display convention)
             if k in self.position_value_labels:
-                display_val = self.internal_target_values.get(k, 0.0)
-                self.position_value_labels[k].value = f"{display_val:.2f}°"
+                self.position_value_labels[k].value = f"{-v:.2f}°"
         
         if joint_values:
             self.initial_sync_done = True
@@ -338,7 +337,126 @@ class JogView(flet.Container):
     # on_reset_click removed from here as per request
         
     def on_change_tool_click(self, e):
-        if self.uart: self.uart.send_message("TOOL_CHANGE")
+        """Shows tool selection dialog with images."""
+        if not self.page: return
+        
+        self.tool_change_dialog = None
+        
+        def close_dlg(e=None):
+            if self.tool_change_dialog:
+                self.page.close(self.tool_change_dialog)
+                self.page.update()
+        
+        def select_vacuum(e):
+            if hasattr(self, 'on_global_set_tool') and self.on_global_set_tool:
+                self.on_global_set_tool("CHWYTAK_MALY")
+            elif self.ik: 
+                self.ik.set_tool("CHWYTAK_MALY")
+            if self.uart: self.uart.send_message("TOOL_VAC")
+            close_dlg()
+            self._calculate_forward_kinematics()
+            self.page.snack_bar = flet.SnackBar(flet.Text("Active Tool: Vacuum Gripper"), bgcolor=flet.Colors.GREEN)
+            self.page.snack_bar.open = True
+            self.page.update()
+        
+        def select_electric(e):
+            if hasattr(self, 'on_global_set_tool') and self.on_global_set_tool:
+                self.on_global_set_tool("CHWYTAK_DUZY")
+            elif self.ik: 
+                self.ik.set_tool("CHWYTAK_DUZY")
+            if self.uart: self.uart.send_message("TOOL_EGRIP")
+            close_dlg()
+            self._calculate_forward_kinematics()
+            self.page.snack_bar = flet.SnackBar(flet.Text("Active Tool: Electric Gripper"), bgcolor=flet.Colors.GREEN)
+            self.page.snack_bar.open = True
+            self.page.update()
+        
+        # Create clickable tool panels
+        panel_style = {
+            "bgcolor": "#3D3D3D",
+            "border_radius": 10,
+            "border": flet.border.all(2, "#555555"),
+            "padding": 10,
+            "width": 220,
+            "height": 210,
+            "alignment": flet.alignment.center,
+        }
+        
+        def make_hover_effect(container, on_click_func):
+            def on_hover(e):
+                if e.data == "true":
+                    container.border = flet.border.all(3, flet.Colors.CYAN_400)
+                    container.bgcolor = "#4D4D4D"
+                else:
+                    container.border = flet.border.all(2, "#555555")
+                    container.bgcolor = "#3D3D3D"
+                container.update()
+            container.on_hover = on_hover
+            container.on_click = on_click_func
+        
+        vacuum_panel = flet.Container(
+            content=flet.Column([
+                flet.Image(src="Gripper1.png", height=160, fit=flet.ImageFit.CONTAIN),
+                flet.Text("Vacuum Gripper", size=15, weight="bold", color="white", text_align=flet.TextAlign.CENTER)
+            ], horizontal_alignment=flet.CrossAxisAlignment.CENTER, spacing=8),
+            **panel_style
+        )
+        make_hover_effect(vacuum_panel, select_vacuum)
+        
+        electric_panel = flet.Container(
+            content=flet.Column([
+                flet.Image(src="Gripper2.png", height=160, fit=flet.ImageFit.CONTAIN),
+                flet.Text("Electric Gripper", size=15, weight="bold", color="white", text_align=flet.TextAlign.CENTER)
+            ], horizontal_alignment=flet.CrossAxisAlignment.CENTER, spacing=8),
+            **panel_style
+        )
+        make_hover_effect(electric_panel, select_electric)
+        
+        tools_row = flet.Row([
+            vacuum_panel,
+            electric_panel
+        ], spacing=30, alignment=flet.MainAxisAlignment.CENTER)
+        
+        def on_change_click(e):
+            if self.uart: self.uart.send_message("TOOL_CHANGE")
+            self.page.snack_bar = flet.SnackBar(flet.Text("Tool change command sent"), bgcolor=flet.Colors.BLUE)
+            self.page.snack_bar.open = True
+            self.page.update()
+        
+        change_button = flet.ElevatedButton(
+            "CHANGE",
+            icon=flet.Icons.SWAP_HORIZ,
+            style=flet.ButtonStyle(
+                bgcolor=flet.Colors.ORANGE_700,
+                color="white",
+                shape=flet.RoundedRectangleBorder(radius=10)
+            ),
+            height=60,
+            width=300,
+            on_click=on_change_click
+        )
+        
+        dialog_content = flet.Column([
+            tools_row,
+            flet.Container(height=40),
+            flet.Container(content=change_button, alignment=flet.alignment.center)
+        ], horizontal_alignment=flet.CrossAxisAlignment.CENTER, spacing=0)
+        
+        title_row = flet.Row([
+            flet.Text("CHANGE ACTIVE TOOL", size=22, weight="bold", color="white"),
+            flet.IconButton(icon=flet.Icons.CLOSE, icon_size=28, on_click=close_dlg)
+        ], alignment=flet.MainAxisAlignment.SPACE_BETWEEN)
+        
+        self.tool_change_dialog = flet.AlertDialog(
+            title=title_row,
+            title_padding=flet.padding.only(left=20, right=10, top=10, bottom=0),
+            content=flet.Container(content=dialog_content, padding=10, width=520, height=310),
+            modal=True,
+            bgcolor="#2D2D2D"
+        )
+        
+        self.page.open(self.tool_change_dialog)
+        self.page.update()
                 
     def on_standby_click(self, e):
         # Target: All zeros

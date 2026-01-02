@@ -156,6 +156,15 @@ def main(page: ft.Page):
                         if "SETTINGS" in views and views["SETTINGS"]:
                             print("Uruchamiam synchronizację...")
                             views["SETTINGS"].upload_configuration(page)
+                        
+                        # Pokaż dialog wyboru narzędzia po synchronizacji
+                        time.sleep(0.5)
+                        if "JOG" in views and views["JOG"]:
+                            try:
+                                # Wywołaj dialog zmiany narzędzia
+                                views["JOG"].on_change_tool_click(None)
+                            except Exception as ex:
+                                print(f"[MAIN] Error showing tool dialog: {ex}")
 
                     threading.Thread(target=delayed_sync, daemon=True).start()
 
@@ -427,6 +436,16 @@ def main(page: ft.Page):
             cartesian_joints = [np.radians(jog_joints.get(f"J{i+1}", 0.0)) for i in range(6)]
             views["CARTESIAN"].commanded_joints = cartesian_joints
 
+    def global_set_tool(tool_name):
+        """Set tool for ALL views at once"""
+        print(f"[MAIN] global_set_tool called: {tool_name}")
+        if "JOG" in views and views["JOG"] and views["JOG"].ik:
+            views["JOG"].ik.set_tool(tool_name)
+            views["JOG"]._calculate_forward_kinematics()
+        if "CARTESIAN" in views and views["CARTESIAN"] and views["CARTESIAN"].ik:
+            views["CARTESIAN"].ik.set_tool(tool_name)
+            views["CARTESIAN"]._update_labels_logic()
+
     # Inicjalizujemy widoki - ERRORS najpierw, żeby był dostępny dla innych
     if ErrorsView:
         # Przekazujemy callback do ErrorsView
@@ -434,6 +453,7 @@ def main(page: ft.Page):
     if JogView:
         views["JOG"] = JogView(uart_communicator=communicator, on_status_update=global_status_updater, on_error=global_error_handler)
         views["JOG"].on_global_set_homed = global_set_homed  # Add callback
+        views["JOG"].on_global_set_tool = global_set_tool    # Add tool callback
     if CartesianView:
         views["CARTESIAN"] = CartesianView(
             urdf_path="resources/PAROL6.urdf",
@@ -442,6 +462,7 @@ def main(page: ft.Page):
             on_error=global_error_handler
         )
         views["CARTESIAN"].on_global_set_homed = global_set_homed  # Add callback
+        views["CARTESIAN"].on_global_set_tool = global_set_tool    # Add tool callback
     if SettingsView:
         views["SETTINGS"] = SettingsView(uart_communicator=communicator)
     if StatusView:
@@ -520,6 +541,13 @@ def main(page: ft.Page):
                 if "CARTESIAN" in views and views["CARTESIAN"]:
                     print("[MAIN DEBUG] Znalazłem widok CARTESIAN, wywołuję set_homed_status...")
                     views["CARTESIAN"].set_homed_status(True)
+                    
+                    # Jeśli aktywny jest chwytak elektryczny - zamknij go po homingu
+                    if hasattr(views["CARTESIAN"], 'ik') and views["CARTESIAN"].ik:
+                        current_tool = getattr(views["CARTESIAN"].ik, 'current_tool', None)
+                        if current_tool == "CHWYTAK_DUZY":
+                            print("[MAIN] Electric gripper active - sending EGRIP_OPEN")
+                            communicator.send_message("EGRIP_OPEN")
                 
                 # Log HMD info for homing complete
                 if "ERRORS" in views and views["ERRORS"]:
@@ -546,7 +574,7 @@ def main(page: ft.Page):
                     except: pass
                 return 
 
-            if "EGRIPSGRESULT" in data_string:
+            if "EGRIP_SR_" in data_string:
                 if "SETTINGS" in views and views["SETTINGS"]:
                     try: views["SETTINGS"].handle_stall_alert(data_string)
                     except: pass
