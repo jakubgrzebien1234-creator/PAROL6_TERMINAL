@@ -1,0 +1,62 @@
+        elif image_name == "global_settings":
+            other_sliders = []
+            for label, min_val, max_val, key, def_val in [
+                ("SOLENOID ON TIME [s]", 0, 10, "mag_time", 2)
+            ]:
+                start_val = self.global_settings_data.get(key, def_val)
+                val_txt = Text(str(int(start_val)), color="white", size=14, weight="bold")
+                
+                def on_change_other(e, v_txt=val_txt, setting_key=key):
+                    val = int(e.control.value)
+                    v_txt.value = str(val)
+                    v_txt.update()
+                    self.global_settings_data[setting_key] = val
+                
+                def on_release_other(e):
+                    self._save_global_settings()
+                
+                slider = Slider(min=min_val, max=max_val, value=start_val, label="{value}",
+                               active_color=colors.CYAN_400, expand=True,
+                               on_change=on_change_other, on_change_end=on_release_other)
+                other_sliders.append(Row(controls=[
+                    Text(label, color="white", size=13, weight="bold", width=150),
+                    slider,
+                    Container(content=val_txt, width=60, height=32, bgcolor=colors.BLUE_GREY_800,
+                             border_radius=5, border=flet.border.all(1, colors.BLUE_GREY_600), alignment=alignment.center)
+                ], spacing=10, height=40))
+            
+            other_settings_container = Container(
+                content=Column([
+                    Row([
+                        flet.Icon(flet.icons.TUNE, size=20, color=colors.CYAN_400),
+                        Text("Other Settings", size=14, weight="bold", color=colors.CYAN_400)
+                    ], spacing=8),
+                    Column(controls=other_sliders, spacing=10),
+                ], spacing=10),
+                bgcolor="#252525",
+                border_radius=8,
+                border=flet.border.all(1, colors.BLUE_GREY_700),
+                padding=15,
+            )
+
+            action_buttons = Row([
+                ElevatedButton("DEFAULT", height=32, width=140,
+                              style=flet.ButtonStyle(bgcolor=colors.RED_700, color=colors.WHITE, shape=flet.RoundedRectangleBorder(radius=6)), 
+                              on_click=self._restore_global_defaults),
+                ElevatedButton("Send & Save", height=32, width=130,
+                              style=flet.ButtonStyle(bgcolor=colors.GREEN_700, color=colors.WHITE, shape=flet.RoundedRectangleBorder(radius=6)), 
+                              on_click=self._send_global_settings)
+            ], spacing=10)
+            
+            return Column(controls=[
+                Row([
+                    Row([
+                        flet.Icon(flet.icons.SETTINGS, size=28, color=colors.CYAN_400),
+                        Text("GLOBAL SETTINGS", size=20, weight="bold", color="white"),
+                    ], spacing=10),
+                    Container(expand=True), 
+                    action_buttons
+                ], alignment=MainAxisAlignment.SPACE_BETWEEN),
+                flet.Divider(color=colors.BLUE_GREY_700, height=5),
+                other_settings_container,
+            ], spacing=15, expand=True)
