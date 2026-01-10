@@ -160,8 +160,8 @@ class SettingsView(flet.Container):
                         else:
                             self.mode_value_text.color = colors.GREEN_ACCENT
                         self.mode_value_text.update()
-        except Exception as e:
-            print(f"Error in parse_debug_line: {e}")
+        except Exception:
+            pass
 
     def handle_stall_alert(self, data_string):
         if not data_string: return
@@ -182,8 +182,8 @@ class SettingsView(flet.Container):
                                 self.current_test_pos = val
                                 break
                             except: pass
-            except Exception as e:
-                print(f"Parsing Error: {e}")
+            except Exception:
+                pass
 
         # 2. SG_RESULT
         if "_SGRESULT_" in clean_str:
@@ -245,7 +245,7 @@ class SettingsView(flet.Container):
                 if len(settings_list) > 0: current_sens = settings_list[0]
                 if len(settings_list) > 1: current_threshold = settings_list[1]
                 if len(settings_list) < 2: self.motor_settings_data[self.selected_motor_index][4].append(10)
-        except Exception as e: print(f"Err: {e}")
+        except Exception: pass
 
         if not self.chart_data_points:
             self.chart_data_points = [ft.LineChartDataPoint(i, 0) for i in range(50)]
@@ -348,7 +348,6 @@ class SettingsView(flet.Container):
     # --- STRICT TEST MOTION ---
     def _run_test_motion(self, e):
         def move_and_wait_strict(motor, target_angle):
-            print(f"[TEST] Sending J{motor}_{target_angle}")
             if self.comm: self.comm.send_message(f"J{motor}_{target_angle}\r\n")
             
             time.sleep(0.5)
@@ -362,7 +361,6 @@ class SettingsView(flet.Container):
                 diff = abs(current - target_angle)
                 
                 if diff <= strict_tolerance:
-                    print(f"[TEST] SUCCESS! Reached {target_angle} deg.")
                     return True
                 
                 if abs(current - last_position) < 0.01:
@@ -374,8 +372,6 @@ class SettingsView(flet.Container):
                 
                 if stuck_counter > 30:
                     err_msg = f"ERROR: Robot stuck at {current}° (Target: {target_angle}°)"
-                    print(f"\n[TEST ERROR] {err_msg}")
-                    print("!!! CHECK GEAR RATIOS !!!\n")
                     
                     if self.page: 
                         self.page.snack_bar = ft.SnackBar(ft.Text(err_msg), bgcolor=ft.colors.RED)
@@ -389,8 +385,6 @@ class SettingsView(flet.Container):
             motor = self.selected_motor_index
             self._reset_stall_status(None)
             
-            print("--- START STRICT SEQUENCE ---")
-            
             if not move_and_wait_strict(motor, 30): return
             time.sleep(1.0)
             
@@ -399,7 +393,6 @@ class SettingsView(flet.Container):
             
             if not move_and_wait_strict(motor, 0): return
             
-            print("--- END STRICT SEQUENCE: OK ---")
             if self.page: 
                 self.page.snack_bar = ft.SnackBar(ft.Text("Test Complete: Perfect Accuracy"), bgcolor=ft.colors.GREEN)
                 self.page.snack_bar.open = True
@@ -563,7 +556,7 @@ class SettingsView(flet.Container):
             for _ in range(3):
                 if self.comm: self.comm.send_message("CONFIG_DONE\r\n")
                 time.sleep(0.5)
-        except Exception as e: print(f"Error: {e}")
+        except Exception: pass
         finally:
             if target_page and loading_dialog:
                 loading_dialog.open = False
@@ -599,13 +592,13 @@ class SettingsView(flet.Container):
             if is_global:
                 try:
                     self.global_settings_data[global_keys[idx]] = save_val
-                except Exception as ex:
-                    print(f"Global slider update error: {ex}")
+                except Exception:
+                    pass
             else:
                 try:
                     self.motor_settings_data[self.selected_motor_index][self.active_slider_set_id][idx] = save_val
-                except Exception as ex:
-                    print(f"Slider update error: {ex}")
+                except Exception:
+                    pass
 
         def on_release(e):
             if is_global:
@@ -725,11 +718,10 @@ class SettingsView(flet.Container):
 
         if final_command:
             final_command += "\n\r"
-            print(f"Sending: {final_command.strip()}")
             if self.comm and self.comm.is_open():
                 self.comm.send_message(final_command)
             else:
-                print("No connection")
+                pass
 
     def _get_default_settings(self):
         return {
@@ -754,8 +746,8 @@ class SettingsView(flet.Container):
         try:
             with open(self.config_file_path, "w") as f:
                 json.dump(self.motor_settings_data, f, indent=4)
-        except Exception as e:
-            print(f"JSON Save Error: {e}")
+        except Exception:
+            pass
 
     def _load_global_settings(self):
         try:
@@ -769,8 +761,8 @@ class SettingsView(flet.Container):
         try:
             with open("global_settings.json", "w") as f:
                 json.dump(self.global_settings_data, f, indent=4)
-        except Exception as e:
-            print(f"Global Settings Save Error: {e}")
+        except Exception:
+            pass
 
     def _get_default_global_settings(self):
         return {
@@ -793,8 +785,8 @@ class SettingsView(flet.Container):
         try:
             with open("gripper_settings.json", "w") as f:
                 json.dump(self.gripper_settings_data, f, indent=4)
-        except Exception as e:
-            print(f"Gripper Settings Save Error: {e}")
+        except Exception:
+            pass
 
     def _get_default_gripper_settings(self):
         return {
@@ -814,11 +806,10 @@ class SettingsView(flet.Container):
         mag_time = self.global_settings_data.get("mag_time", 2)
         
         final_command = f"OT,global,{mag_time}\r\n"
-        print(f"Sending: {final_command.strip()}")
         if self.comm and self.comm.is_open():
             self.comm.send_message(final_command)
         else:
-            print("No connection")
+            pass
 
     def reset_view(self):
         self.content = self._create_main_view()

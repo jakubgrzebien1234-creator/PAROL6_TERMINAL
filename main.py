@@ -13,8 +13,6 @@ try:
     from gui.errors import ErrorsView
     from gui.communication import UARTCommunicator
 except ImportError as e:
-    print(f"Błąd importu modułów GUI: {e}")
-    # Fallback dla testów
     CartesianView = JogView = SettingsView = StatusView = ErrorsView = UARTCommunicator = None
 
 from PIL import Image
@@ -36,7 +34,7 @@ def main(page: ft.Page):
             def is_open(self): return False
             def connect(self, port): return False
             def disconnect(self): pass
-            def send_message(self, msg): print(f"Dummy send: {msg}")
+            def send_message(self, msg): pass
             on_data_received = None
         communicator = DummyComm()
     
@@ -86,7 +84,7 @@ def main(page: ft.Page):
         expand=True,
         padding=20,
         # Zablokowanie interakcji z tym co pod spodem:
-        on_click=lambda e: print("System locked!") 
+        on_click=lambda e: None 
     )
 
     # --- 1. LOGIKA I UI DLA PORTU SZEREGOWEGO ---
@@ -149,10 +147,8 @@ def main(page: ft.Page):
                         views["ERRORS"].handle_error_code("CON")
 
                     def delayed_sync():
-                        print("Czekam na start STM32...")
                         time.sleep(2.0) 
                         if "SETTINGS" in views and views["SETTINGS"]:
-                            print("Uruchamiam synchronizację...")
                             views["SETTINGS"].upload_configuration(page)
                         
                         # Pokaż dialog wyboru narzędzia po synchronizacji
@@ -162,12 +158,12 @@ def main(page: ft.Page):
                                 # Wywołaj dialog zmiany narzędzia
                                 views["JOG"].on_change_tool_click(None)
                             except Exception as ex:
-                                print(f"[MAIN] Error showing tool dialog: {ex}")
+                                pass
 
                     threading.Thread(target=delayed_sync, daemon=True).start()
 
             else:
-                print("Nie wybrano portu!")
+                pass
         page.update()
 
     btn_connect.on_click = toggle_connection
@@ -279,7 +275,7 @@ def main(page: ft.Page):
         error_btn = footer_buttons_map.get("ERRORS")
         if not error_btn: return
 
-        print("[MAIN DEBUG] Starting animation loop")
+        # Starting animation loop
         state_toggle = False
         
         while not stop_animation and current_alert_level != "NONE":
@@ -309,7 +305,7 @@ def main(page: ft.Page):
             time.sleep(0.5) # Częstotliwość pulsowania
             
         # Po zakończeniu pętli - czyścimy styl
-        print("[MAIN DEBUG] Stopping animation loop")
+        # Po zakończeniu pętli - czyścimy styl
         error_btn.style.side = ft.BorderSide(0, ft.colors.TRANSPARENT)
         try:
             error_btn.update()
@@ -322,7 +318,6 @@ def main(page: ft.Page):
         # Pobieramy przycisk dynamicznie ze mapy
         error_btn = footer_buttons_map.get("ERRORS")
         if not error_btn: 
-            print("[MAIN DEBUG] Error button NOT FOUND during style update!")
             return
 
         if level == "NONE":
@@ -366,7 +361,6 @@ def main(page: ft.Page):
 
     # Callback do zmiany stanu błędu - WŁAŚCIWY
     def update_global_error_state(level):
-        print(f"[MAIN DEBUG] update_global_error_state called with: {level}")
         nonlocal current_alert_level
         
         if level == "ERROR":
@@ -401,7 +395,6 @@ def main(page: ft.Page):
     # --- SHARED STATE CALLBACKS ---
     def global_set_homed(is_homed):
         """Set homing status for ALL views at once"""
-        print(f"[MAIN] global_set_homed called: {is_homed}")
         if "JOG" in views and views["JOG"]:
             views["JOG"].set_homed_status(is_homed)
         if "CARTESIAN" in views and views["CARTESIAN"]:
@@ -421,7 +414,6 @@ def main(page: ft.Page):
 
     def global_set_tool(tool_name):
         """Set tool for ALL views at once"""
-        print(f"[MAIN] global_set_tool called: {tool_name}")
         if "JOG" in views and views["JOG"] and views["JOG"].ik:
             views["JOG"].ik.set_tool(tool_name)
             views["JOG"]._calculate_forward_kinematics()
@@ -461,30 +453,27 @@ def main(page: ft.Page):
             # 0. OBSŁUGA ESTOP
             # ==========================================================
             if "ESTOP_TRIGGER" in data_string:
-                print("[MAIN] !!! ESTOP TRIGGERED !!!")
-                
                 # 1. ZAMYKANIE OKNA BAZOWANIA W SETTINGS
                 if "SETTINGS" in views and views["SETTINGS"]:
                     try:
                         views["SETTINGS"].close_homing_dialog()
-                    except Exception as e:
-                        print(f"Błąd zamykania dialogu SETTINGS: {e}")
+                    except Exception:
+                        pass
 
-                # 2. ZAMYKANIE OKNA BAZOWANIA W JOG (TEGO BRAKOWAŁO!)
-                if "JOG" in views and views["JOG"]:     # ### <--- DODAJ TO
+                # 2. ZAMYKANIE OKNA BAZOWANIA W JOG
+                if "JOG" in views and views["JOG"]:
                     try:
                         # Ustawiamy status na False (homing przerwany) - to zamknie okno
                         views["JOG"].set_homed_status(False)
-                        print("[MAIN] Wymuszono zamknięcie dialogu w JOG przez ESTOP")
-                    except Exception as e:
-                        print(f"Błąd zamykania dialogu JOG: {e}")
+                    except Exception:
+                        pass
                 
                 # 3. Reset dla CARTESIAN
                 if "CARTESIAN" in views and views["CARTESIAN"]:
                     try:
                         views["CARTESIAN"].set_homed_status(False)
-                    except Exception as e:
-                         print(f"Błąd resetu CARTESIAN: {e}")
+                    except Exception:
+                        pass
 
                 # 3. Pokaż czerwoną nakładkę ESTOP
                 estop_overlay.visible = True
@@ -496,9 +485,7 @@ def main(page: ft.Page):
                 
                 return
             
-            # --- DODAJ TO TUTAJ (Pod spodem) ---
             if "ESTOP_RELEASE" in data_string or "ESTOP_OFF" in data_string:
-                print("[MAIN] ESTOP ZWOLNIONY - Ukrywam czerwony ekran")
                 estop_overlay.visible = False
                 page.update()
                 return
@@ -506,30 +493,24 @@ def main(page: ft.Page):
             # ==========================================================
             # 2. HOMING I ODBLOKOWANIE (Z DIAGNOSTYKĄ)
             # ==========================================================
-            # ... wewnątrz handle_uart_data ...
             if "HOMING_COMPLETE_OK" in data_string:
-                print("\n[MAIN DEBUG] >>> OTRZYMANO SYGNAŁ: HOMING_COMPLETE_OK <<<") 
                 
                 # Debugowanie SETTINGS
                 if "SETTINGS" in views and views["SETTINGS"]:
-                    print("[MAIN DEBUG] Znalazłem widok SETTINGS, wywołuję set_homed_status...")
                     views["SETTINGS"].set_homed_status(True)
                 
                 # Debugowanie JOG
                 if "JOG" in views and views["JOG"]:
-                    print("[MAIN DEBUG] Znalazłem widok JOG, wywołuję set_homed_status...")
                     views["JOG"].set_homed_status(True)
                 
                 # Debugowanie CARTESIAN
                 if "CARTESIAN" in views and views["CARTESIAN"]:
-                    print("[MAIN DEBUG] Znalazłem widok CARTESIAN, wywołuję set_homed_status...")
                     views["CARTESIAN"].set_homed_status(True)
                     
                     # Jeśli aktywny jest chwytak elektryczny - zamknij go po homingu
                     if hasattr(views["CARTESIAN"], 'ik') and views["CARTESIAN"].ik:
                         current_tool = getattr(views["CARTESIAN"].ik, 'current_tool', None)
                         if current_tool == "CHWYTAK_DUZY":
-                            print("[MAIN] Electric gripper active - sending EGRIP_OPEN")
                             communicator.send_message("EGRIP_OPEN")
                 
                 # Log HMD info for homing complete
@@ -571,10 +552,6 @@ def main(page: ft.Page):
                     views["ERRORS"].add_log("WARNING", f"Wykryto utyk: {data_string}")
                 return
 
-                if "ERRORS" in views and views["ERRORS"]:
-                    views["ERRORS"].add_log("WARNING", f"Wykryto utyk: {data_string}")
-                return
-
             # ==========================================================
             # 5. HEADER ERRORS (EMM - Missing Motor)
             # ==========================================================
@@ -594,8 +571,8 @@ def main(page: ft.Page):
                         if "ERRORS" in views and views["ERRORS"]:
                             views["ERRORS"].handle_error_code(f"EMM{idx}")
                             
-                except Exception as e:
-                    print(f"[MAIN] Error parsing EMM: {e}")
+                except Exception:
+                    pass
                 return
             if "VAC_ON" in data_string:
                 if "STATUS" in views and views["STATUS"]:
@@ -614,6 +591,20 @@ def main(page: ft.Page):
                     views["STATUS"].update_status("Zawór", "OTWARTY", ft.colors.GREEN_400)
                 return
 
+            # ==========================================================
+            # 7b. PRESSURE DATA (New)
+            # ==========================================================
+            # Format: P:-0.45
+            if data_string.startswith("P:"):
+                try:
+                    pressure_val = data_string[2:].strip()
+                    # Optional: Add validation if it's a number
+                    float(pressure_val) 
+                    if "STATUS" in views and views["STATUS"]:
+                        views["STATUS"].update_status("CISNIENIE", f"{pressure_val} kPa", ft.colors.CYAN_400)
+                except ValueError:
+                    pass
+                return
 
             # ==========================================================
             # 7a. LIMIT SWITCHES (H=Hit/Home, R=Release)
@@ -682,17 +673,12 @@ def main(page: ft.Page):
                             def check_sensor(idx, val):
                                 ot_limit = settings.get(f"sensor_{idx}_ot", 50) # Changed default to 50 to match settings.py
                                 ct_limit = settings.get(f"sensor_{idx}_ct", 90)
-                                
-                                # Debug print to console (visible to user/dev)
-                                # print(f"[DEBUG] Sensor {idx}: Val={val}, OT={ot_limit}, CT={ct_limit}")
 
                                 # Critical (CT) check
                                 if val > ct_limit:
-                                    print(f"[MAIN] !!! Critical Temp Sensor {idx}: {val} > {ct_limit}")
                                     errors.handle_error_code(f"CT{idx}")
                                 # Warning (OT) check - only if not already critical
                                 elif val > ot_limit:
-                                    print(f"[MAIN] ! Warning Temp Sensor {idx}: {val} > {ot_limit}")
                                     errors.handle_error_code(f"OT{idx}")
 
                             check_sensor(1, t1)
@@ -700,8 +686,8 @@ def main(page: ft.Page):
                             check_sensor(3, t3)
                             check_sensor(4, t4)
 
-                except Exception as e:
-                    print(f"[MAIN] Błąd parsowania PROT_: {e}")
+                except Exception:
+                    pass
                 return
 
             # ==========================================================
@@ -753,9 +739,7 @@ def main(page: ft.Page):
             # 7. KODY BŁĘDÓW (E1, E2, W1, W2, IKE, COM, OOR1, CT1, EMM1, STL1, NRL1, etc.)
             # ==========================================================
             import re
-            # Match all known error code patterns:
-            # E1-E5, W1-W2, OT1-OT4, CT1-CT4, EMM1-EMM6, IKE, OOR1-OOR6, COM, COL, OVL, GRE
-            # NRL1-NRL6, SLW, HMS, CFG, GRW, SPD, STL1-STL6, HMD, CON, DIS, RDY, PRG
+            # Match all known error code patterns
             error_code_pattern = r'^(E\d+|W\d+|OT\d+|CT\d+|EMM\d+|OOR\d+|NRL\d+|STL\d+|IKE|COM|COL|OVL|GRE|SLW|HMS|CFG|GRW|SPD|HMD|CON|DIS|RDY|PRG)$'
             error_code_match = re.match(error_code_pattern, data_string)
             if error_code_match:

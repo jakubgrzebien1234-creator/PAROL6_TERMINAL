@@ -41,7 +41,7 @@ class KinematicsEngine:
         self.world_offset = np.array([0.0, 0.0, 0.0]) 
 
         try:
-            print(f"[IK] Loading URDF: {urdf_path}")
+            # Loading URDF
             
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", UserWarning)
@@ -58,25 +58,21 @@ class KinematicsEngine:
             self.chain.active_links_mask = mask
             self.active_links_mask = mask # Store strictly for reference if needed
             
-            # === ZWIĘKSZONA PRECYZJA ===
-            self.chain.max_iterations = 500
-            self.chain.convergence_limit = 1e-6
+            # === ZWIĘKSZONA PRECYZJA (Optimized for CPU) ===
+            self.chain.max_iterations = 50
+            self.chain.convergence_limit = 1e-4
             
             self.joint_limits_rad = self._load_active_joint_limits()
             self.visual_origins = self._load_visual_origins(urdf_path)
             
             # Default to Small Gripper as per previous behavior/logic
             self.set_tool("CHWYTAK_MALY")
-            
-            print(f"[IK] Ready. Mask: {mask}")
 
         except Exception as e:
-            print(f"[IK ERROR] {e}")
             self._setup_mock_chain()
 
     def set_tool(self, tool_name):
         if tool_name not in ROBOT_TOOLS:
-            print(f"[IK] Unknown tool: {tool_name}")
             return
 
         tool_data = ROBOT_TOOLS[tool_name]
@@ -85,7 +81,6 @@ class KinematicsEngine:
         self.tool_rotation_matrix = R.from_euler('xyz', rpy, degrees=True).as_matrix()
         
         self.current_tool = tool_name
-        print(f"[IK] Tool Set: {tool_name} -> Offset: {self.tool_translation}")
 
     # ================= KINEMATYKA =================
 
@@ -407,7 +402,6 @@ class CartesianView(flet.Container):
             if is_homed.lower() == "true": is_homed = True
             else: is_homed = False
         
-        print(f"[CARTESIAN] set_homed_status called: {is_homed} (type: {type(is_homed)})")
         self.is_robot_homed = bool(is_homed)
         
         msg = "Robot homed!" if self.is_robot_homed else "Homing lost! Homing required."
@@ -501,7 +495,7 @@ class CartesianView(flet.Container):
                     self.commanded_joints[i] = feedback_rad[i]
                 
         except Exception as e:
-            print(f"[CARTESIAN] Error updating from feedback: {e}")
+            pass
 
     def on_home_click(self, e):
         self._show_homing_choice_dialog()
@@ -592,7 +586,7 @@ class CartesianView(flet.Container):
                     current_local = current_local + (diff / dist) * step_size
                     self.commanded_joints = current_local.tolist()
                     self.send_current_pose()
-                    time.sleep(0.05)
+                    time.sleep(0.1) # 10Hz animation step
             finally:
                 self.is_jogging = False
                 self.last_jog_time = time.time()
@@ -736,7 +730,7 @@ class CartesianView(flet.Container):
                     self._update_labels_logic()
                     self.page.update()
             except: pass 
-            time.sleep(0.15) 
+            time.sleep(0.10) # 10Hz update rate (reduced from 20Hz) 
 
     def _update_labels_logic(self):
         """
@@ -772,15 +766,15 @@ class CartesianView(flet.Container):
                     self.lbl_joints[i].value = f"{deg_val:.2f}°"
                     
         except Exception as e:
-            print(f"[CARTESIAN] FK error: {e}")
+            pass
 
     # --- LOGIKA RUCHU (AGGRESSIVE STABILITY) ---
     def _jog_thread(self, axis, direction):
-        # Parametry "Ultra-Responsive":
-        # Mały krok (2.0mm) + Mało iteracji (5) = Płynność
-        # 2.0mm * 20Hz = 40mm/s (nieco wolniej, ale stabilnie)
-        BASE_STEP_MM = 2.0
-        BASE_STEP_RAD = 0.006  # Smaller step for rotation stability near singularities
+        # Parametry "Ultra-Responsive" - ZWIĘKSZONE PRĘDKOŚCI
+        # BASE_STEP_MM: 5.0mm * 10Hz = 50mm/s @ 100%
+        # BASE_STEP_RAD: 0.02rad * 10Hz = ~11.5 deg/s @ 100%
+        BASE_STEP_MM = 5.0
+        BASE_STEP_RAD = 0.02  # Faster rotation
         
         # Workspace limits (Expanded for pure URDF exploration)
         WORKSPACE_LIMITS = {
@@ -873,9 +867,9 @@ class CartesianView(flet.Container):
 
             self.send_current_pose()
             
-            # Target: 20Hz (50ms)
+            # Target: 10Hz (100ms) - Optimized for CPU
             elapsed = time.time() - loop_start
-            sleep_time = max(0.01, 0.05 - elapsed)
+            sleep_time = max(0.01, 0.10 - elapsed)
             time.sleep(sleep_time)
 
     def send_current_pose(self):
@@ -889,7 +883,7 @@ class CartesianView(flet.Container):
         new_state = not self.gripper_states.get(g_type, False)
         self.gripper_states[g_type] = new_state
         
-        cmd = "VAC_ON" if new_state else "VAC_OFF"
+        cmd = "VGripON" if new_state else "VGripOFF"
         if g_type == "electric": 
             cmd = "EGRIP_CLOSE" if new_state else "EGRIP_OPEN"
             

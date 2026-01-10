@@ -43,6 +43,7 @@ class JogView(flet.Container):
         # Wewnętrzne cele (to co chcemy osiągnąć)
         self.internal_target_values = { f"J{i}": 0.0 for i in range(1, 7) }
         self.initial_sync_done = False
+        self.last_jog_time = 0.0 # Debounce timer for feedback sync
 
         # Limity
         self.joint_limits = {
@@ -148,10 +149,22 @@ class JogView(flet.Container):
                 # Wyślij (biblioteka communication dodaje \r\n zazwyczaj, 
                 # ale jeśli nie, upewnij się w communication.py)
                 self.uart.send_message(cmd)
-            except Exception as e:
-                print(f"[JOG] Błąd wysyłania: {e}")
+            except Exception:
+                pass
 
     def update_joints_and_fk(self, joint_values: dict):
+        # Prevent feedback jitter: if jogging, ignoring external feedback updates
+        is_internal_update = (joint_values is self.internal_target_values)
+        
+        # Condition 1: Jogging is active -> Block external
+        if self.is_jogging and not is_internal_update:
+            return
+            
+        # Condition 2: Just stopped jogging (debounce) -> Block external for 1.0s
+        # This prevents "rubber banding" where displayed value jumps back to lagging robot position
+        if not is_internal_update and (time.time() - self.last_jog_time < 1.0):
+            return
+
         for k, v in joint_values.items():
             self.current_raw_values[k] = v 
             
@@ -159,9 +172,9 @@ class JogView(flet.Container):
             if not self.initial_sync_done:
                 self.internal_target_values[k] = v
             
-            # Display actual feedback value from robot (inverted sign for display convention)
+            # Display actual feedback value from robot
             if k in self.position_value_labels:
-                self.position_value_labels[k].value = f"{-v:.2f}°"
+                self.position_value_labels[k].value = f"{v:.2f}°"
         
         if joint_values:
             self.initial_sync_done = True
@@ -169,14 +182,18 @@ class JogView(flet.Container):
         if self.page: self.page.update()
 
     def _jog_thread(self, joint_code, button_type):
-        STEP_INCREMENT = 0.5
-        # No direction inversion needed with URDF-based kinematics
-        # + button = positive direction, - button = negative direction
-
+        # Increased base speed for 100% velocity
+        BASE_INCREMENT = 2.5 
+        
         while self.is_jogging:
             current_target = self.internal_target_values.get(joint_code, 0.0)
             button_dir = 1 if button_type == "plus" else -1
-            delta = STEP_INCREMENT * button_dir
+            
+            # Apply velocity scaling
+            factor = self.speed_percent / 100.0
+            step = max(0.1, BASE_INCREMENT * factor)
+            
+            delta = step * button_dir
             new_target = current_target + delta
             
             if joint_code in self.joint_limits:
@@ -191,8 +208,8 @@ class JogView(flet.Container):
             
             # Update local UI immediately (FK + displayed angles)
             self.update_joints_and_fk(self.internal_target_values)
-            
-            time.sleep(0.05)
+                        
+            time.sleep(0.1) # 10Hz update rate (reduced from 20Hz)
 
     def on_jog_start(self, e, joint_code, direction, btn):
         if not self.is_robot_homed:
@@ -209,13 +226,13 @@ class JogView(flet.Container):
     def on_jog_stop(self, e, joint_code, direction, btn):
         if btn != self.active_jog_btn: return
         self.is_jogging = False
+        self.last_jog_time = time.time() # Debounce feedback
         self.active_jog_btn = None
         btn.content.bgcolor = "#444444"
         btn.content.border = flet.border.all(1, "#666")
         btn.content.update()
 
-    def set_homed_status(self, is_homed: bool):
-        print(f"[JOG] set_homed_status wywołane: {is_homed}") 
+    def set_homed_status(self, is_homed: bool): 
         self.is_robot_homed = is_homed
         if is_homed:
             self.internal_target_values = { f"J{i}": 0.0 for i in range(1, 7) }
@@ -246,7 +263,6 @@ class JogView(flet.Container):
         def on_start_homing(e):
             close_dlg(e)
             if self.uart:
-                print("[JOG] Start Homing")
                 self.uart.send_message("HOME")
                 self._show_homing_progress_dialog()
 
@@ -504,7 +520,7 @@ class JogView(flet.Container):
                 
                 self.send_all_joints()
                 self.update_joints_and_fk(self.internal_target_values)
-                time.sleep(0.05)
+                time.sleep(0.1)
             
             self.is_jogging = False
             
@@ -519,7 +535,7 @@ class JogView(flet.Container):
         g_type = e.control.data 
         new_state = not self.gripper_states.get(g_type, False)
         self.gripper_states[g_type] = new_state
-        cmd = "VAC_ON" if new_state else "VAC_OFF"
+        cmd = "VGripON" if new_state else "VGripOFF"
         if g_type == "electric": cmd = "EGRIP_CLOSE" if new_state else "EGRIP_OPEN"
         e.control.style.bgcolor = flet.colors.GREEN_600 if new_state else flet.colors.RED_600
         e.control.content.value = "ON" if new_state else "OFF"
@@ -537,7 +553,10 @@ class JogView(flet.Container):
             return flet.Container(content=flet.Column([flet.Text(display_name, size=13, color="white", text_align="center"), flet.Row([btn], expand=True)], spacing=2), **container_style)
         else:
             joint_code = "UNK"
-            if "(" in display_name: joint_code = display_name.split("(")[1].split(")")[0]
+            if "(" in display_name: 
+                joint_code = display_name.split("(")[1].split(")")[0]
+            else:
+                joint_code = display_name
             def mk_btn(txt, d, code):
                 c = flet.Container(content=flet.Text(txt, size=44, weight="bold", color="white"), bgcolor="#444444", border_radius=8, alignment=flet.alignment.center, height=110, shadow=flet.BoxShadow(blur_radius=2, color="black"), border=flet.border.all(1, "#666"))
                 gest = flet.GestureDetector(content=c, drag_interval=30, on_tap_down=lambda e: self.on_jog_start(e, code, d, gest), on_tap_up=lambda e: self.on_jog_stop(e, code, d, gest), on_long_press_end=lambda e: self.on_jog_stop(e, code, d, gest))
@@ -574,5 +593,5 @@ class JogView(flet.Container):
             if "B" in self.tcp_labels: self.tcp_labels["B"].value = f"{euler[1]:.2f}°"
             if "C" in self.tcp_labels: self.tcp_labels["C"].value = f"{euler[2]:.2f}°"
             
-        except Exception as e:
-            print(f"[JOG] FK error: {e}")
+        except Exception:
+            pass

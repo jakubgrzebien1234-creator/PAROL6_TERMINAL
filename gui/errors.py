@@ -363,7 +363,6 @@ class ErrorsView(flet.Container):
         # Send via UART if connected
         if self.uart and self.uart.is_open():
             self.uart.send_message(code)
-            print(f"[ERRORS] Sent error code: {code}")
 
     def _reset_robot_errors(self, e):
         """Sends the command to reset robot errors AND clears error state locally."""
@@ -377,6 +376,5 @@ class ErrorsView(flet.Container):
         # 3. Send command
         if self.uart and self.uart.is_open():
             self.uart.send_message("ROBOT_OK") # Changed from COLLISION_OK as requested
-            print("[ERRORS] Sent ROBOT_OK")
         else:
             self.add_log("WARNING", "Cannot send reset command: UART disconnected.")
