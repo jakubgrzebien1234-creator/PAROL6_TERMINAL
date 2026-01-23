@@ -9,21 +9,21 @@ from scipy.spatial.transform import Rotation as R
 from scipy.spatial.transform import Slerp
 
 # === TOOL DICTIONARY ===
-# UPDATED WITH USER OFFSET: Z(-90) -> RY(-180) -> X(-100)
 ROBOT_TOOLS = {
     "CHWYTAK_MALY": {
-        "translation": [0.100, 0.0, -0.090],  # 100mm Forward (due to RY flip), 90mm down
+        "translation": [0.100, 0.0, -0.090],
         "orientation": [0.0, -180.0, 0.0]
     },
     
     "CHWYTAK_DUZY": {
-        "translation": [0.0, 0.0, -0.18831],  # Z: -188.31mm
-        "orientation": [0.0, -90.0, 0.0]       # Rotation around Y: -90 degrees
+        "translation": [0.0, 0.0, -0.18831],
+        "orientation": [0.0, -90.0, 0.0]
     }
 }
 
 # ==============================================================================
-# 1. KINEMATICS ENGINE (UPDATED FROM USER REQUEST)
+# ==============================================================================
+# 1. KINEMATICS ENGINE
 # ==============================================================================
 class KinematicsEngine:
     def __init__(self, urdf_path, active_links_mask=None):
@@ -37,7 +37,6 @@ class KinematicsEngine:
         self.tool_rotation_matrix = np.eye(3) 
         self.current_tool = "NONE"
         
-        # Zero World Offset - using pure tool calibration instead
         self.world_offset = np.array([0.0, 0.0, 0.0]) 
 
         try:
@@ -47,7 +46,7 @@ class KinematicsEngine:
                 warnings.simplefilter("ignore", UserWarning)
                 self.chain = Chain.from_urdf_file(urdf_path)
             
-            # Automatyczna maska (fallback logic matching User's code)
+            
             mask = []
             for link in self.chain.links:
                 if link.joint_type == 'fixed':
@@ -56,16 +55,15 @@ class KinematicsEngine:
                     mask.append(True)
             
             self.chain.active_links_mask = mask
-            self.active_links_mask = mask # Store strictly for reference if needed
+            self.active_links_mask = mask
             
-            # === ZWIĘKSZONA PRECYZJA (Optimized for CPU) ===
+            # === INCREASED PRECISION ===
             self.chain.max_iterations = 50
             self.chain.convergence_limit = 1e-4
             
             self.joint_limits_rad = self._load_active_joint_limits()
             self.visual_origins = self._load_visual_origins(urdf_path)
             
-            # Default to Small Gripper as per previous behavior/logic
             self.set_tool("CHWYTAK_MALY")
 
         except Exception as e:
@@ -82,17 +80,15 @@ class KinematicsEngine:
         
         self.current_tool = tool_name
 
-    # ================= KINEMATYKA =================
+    # ================= KINEMATICS =================
 
     def forward_kinematics(self, active_angles):
-        """Returns 4x4 TCP Matrix (including tool offset)."""
         full_joints = self._active_to_full(active_angles)
         flange_matrix = self.chain.forward_kinematics(full_joints)
         
         R_flange = flange_matrix[:3, :3]
         P_flange = flange_matrix[:3, 3]
         
-        # P_tcp = P_flange + (R_flange * Offset) + WorldOffset
         offset_global = R_flange @ self.tool_translation
         P_tcp = P_flange + offset_global + self.world_offset
         
@@ -103,29 +99,18 @@ class KinematicsEngine:
         return tcp_matrix
 
     def inverse_kinematics(self, target_position, target_orientation, initial_guess=None):
-        """
-        Solves IK for a target TCP position and orientation.
-        target_position: [x, y, z] of TCP
-        target_orientation: 3x3 rotation matrix of TCP
-        """
         if initial_guess is None: initial_guess = np.zeros(6)
         
-        # Revert World Offset before solving in URDF frame
         target_raw = target_position - self.world_offset
         
-        # 1. Determine Flange Orientation
-        # R_tcp = R_flange * R_tool  =>  R_flange = R_tcp * inv(R_tool)
         target_rot_matrix = target_orientation 
         flange_rot_matrix = target_rot_matrix @ np.linalg.inv(self.tool_rotation_matrix)
         
-        # 2. Determine Flange Position
-        # P_tcp = P_flange + (R_flange * Offset)  =>  P_flange = P_tcp - (R_flange * Offset)
         offset_global = flange_rot_matrix @ self.tool_translation
         target_pos_flange = target_raw - offset_global
         
         full_guess = self._active_to_full(initial_guess)
         
-        # 3. Solver IKPy
         full_sol = self.chain.inverse_kinematics(
             target_position=target_pos_flange,
             target_orientation=flange_rot_matrix, 
@@ -135,11 +120,10 @@ class KinematicsEngine:
         
         return self._full_to_active(full_sol)
 
-    # ================= HELPERS (Updated to match User's logic) =================
+    # ================= HELPERS =================
 
     def _active_to_full(self, active_joints):
         arr = np.array(active_joints, dtype=float).flatten()
-        # Handle cases where input might be [0, J1, J2...] or just [J1, J2...]
         if len(arr) == 7: arr = arr[1:] 
         if len(arr) != 6: arr = np.resize(arr, 6)
         
@@ -156,14 +140,13 @@ class KinematicsEngine:
         return np.zeros(6)
     
     def _load_active_joint_limits(self):
-        # Specific Parol6 limits
         deg = [
-            (-90, 90),  # J1
-            (-50, 140), # J2
-            (-100, 70), # J3
-            (-100, 180),# J4
-            (-120, 110),# J5
-            (-110, 180) # J6
+            (-90, 90),
+            (-50, 140),
+            (-100, 70),
+            (-100, 180),
+            (-120, 110),
+            (-110, 180)
         ]
         return [(np.deg2rad(mn), np.deg2rad(mx)) for mn, mx in deg]
 
@@ -192,13 +175,13 @@ class KinematicsEngine:
 
 
 # ==============================================================================
-# 2. CARTESIAN VIEW (MINIMALISTYCZNY)
+# ==============================================================================
+# 2. CARTESIAN VIEW
 # ==============================================================================
 class CartesianView(flet.Container):
     def __init__(self, uart_communicator, urdf_path, active_links_mask=None, on_error=None):
         super().__init__()
         self.uart = uart_communicator
-        # Note: New KinematicsEngine handles masks internally mostly, but we pass what we have
         self.ik = KinematicsEngine(urdf_path, active_links_mask)
         self.on_error = on_error
         
@@ -208,24 +191,19 @@ class CartesianView(flet.Container):
         self.is_robot_homed = False
         self.alive = True 
         
-        # Pozycje (startowe zera)
-        self.commanded_joints = [0.0] * 6 # Fixed to 6 for standard 6-axis
-        # self.tool_offset is now handled by self.ik.tool_translation / self.ik.set_tool()
+        self.commanded_joints = [0.0] * 6
         
-        # UART feedback values (for display - same as JogView)
         self.feedback_joints_deg = [0.0] * 6
         
-        # Gripper states
         self.gripper_states = {"pneumatic": False, "electric": False}
         self.jog_speed_percent = 50.0
         
-        self.last_jog_time = 0.0 # Debounce timer
+        self.last_jog_time = 0.0
 
         self.padding = 10 
 
         self._setup_ui()
 
-        # Start update loop AFTER UI IS READY
         self.update_thread = threading.Thread(target=self._update_loop, daemon=True)
         self.update_thread.start()
         
@@ -251,14 +229,12 @@ class CartesianView(flet.Container):
         # ----------------------------------------------------------------------
         # 1. LEFT COLUMN: AXIS CONTROLS
         # ----------------------------------------------------------------------
-        # Match JogView: A=Roll(X), B=Yaw(Z), C=Pitch(Y)
         axes_list = [
             ("X", "x"), ("A", "rx"),
             ("Y", "y"), ("B", "rz"),
             ("Z", "z"), ("C", "ry")
         ]
 
-        # Use Grid-like structure (Rows of 2)
         controls_column = flet.Column(spacing=5, expand=True)
         for i in range(0, len(axes_list), 2):
             if i+1 < len(axes_list):
@@ -280,7 +256,8 @@ class CartesianView(flet.Container):
         controls_container = flet.Container(content=controls_column, expand=20)
 
         # ----------------------------------------------------------------------
-        # 2. CENTER COLUMN: TOOLS & VELOCITY (MATCHING JOG.PY)
+        # ----------------------------------------------------------------------
+        # 2. CENTER COLUMN: TOOLS & VELOCITY
         # ----------------------------------------------------------------------
         # Velocity Panel
         self.lbl_speed = flet.Text(f"{int(self.jog_speed_percent)}%", size=18, weight="bold", color="cyan", max_lines=1)
@@ -306,8 +283,7 @@ class CartesianView(flet.Container):
             flet.ElevatedButton("GRIPPER CHANGE", icon=flet.icons.HANDYMAN, style=flet.ButtonStyle(bgcolor=flet.colors.PURPLE_700, color="white", shape=flet.RoundedRectangleBorder(radius=8)), on_click=self.on_change_tool_click, expand=True, width=10000),
             flet.ElevatedButton("STOP", icon=flet.icons.STOP_CIRCLE, style=flet.ButtonStyle(bgcolor=flet.colors.RED_700, color="white", shape=flet.RoundedRectangleBorder(radius=8)), on_click=self.on_stop_click, expand=True, width=10000),
             flet.ElevatedButton("STANDBY", icon=flet.icons.ACCESSIBILITY, style=flet.ButtonStyle(bgcolor=flet.colors.ORANGE_900, color="white", shape=flet.RoundedRectangleBorder(radius=8)), on_click=self.on_standby_click, expand=True, width=10000),
-            # Spacer removed to allow buttons to fill space
-            # ERROR RESET moved to Errors tab
+
         ], spacing=5, expand=True)
 
         tools_container = flet.Container(content=tools_column, expand=5, padding=flet.padding.symmetric(horizontal=5))
@@ -318,9 +294,9 @@ class CartesianView(flet.Container):
         pos_list = flet.Column(spacing=4, horizontal_alignment="stretch")
         pos_list.controls.append(flet.Text("POSITION", size=14, weight="bold", color="white", text_align="center"))
         
+        
         self.lbl_cart = {}
         
-        # Joints
         self.lbl_joints = []
         for i in range(self.ik.n_active_joints):
             lbl = flet.Text("0.00°", size=13, color="cyan", weight="bold", max_lines=1)
@@ -331,7 +307,6 @@ class CartesianView(flet.Container):
             
         pos_list.controls.append(flet.Divider(height=6, color="#555"))
         
-        # TCP
         for ax in ["X", "Y", "Z", "A", "B", "C"]:
             col = "cyan" if ax in ["X", "Y", "Z"] else "orange"
             unit = "mm" if ax in ["X", "Y", "Z"] else "°"
@@ -360,23 +335,15 @@ class CartesianView(flet.Container):
         self.lbl_speed.value = f"{int(self.jog_speed_percent)}%"
         self.lbl_speed.update()
     
-    # ... (rest of methods)
-    
-    # --- LOGIC METHODS ---
-    
-    # --- LIFECYCLE METHODS ---
     
     def did_mount(self):
-        # Trigger an immediate logic update to popuplate values before first render frame if possible
         try:
             self._update_labels_logic()
-            self.update() # Update this control (CartesianView)
+            self.update() 
         except: pass
         
     def _update_loop(self):
         while self.alive:
-            # Fallback: Force sync IF AND ONLY IF we are purely stationary and data has arrived
-            # This handles the initial connection sync without interrupting movements.
             if not self.is_jogging:
                 has_zeros = all(abs(v) < 0.001 for v in self.commanded_joints)
                 has_feedback = any(abs(v) > 0.01 for v in self.feedback_joints_deg)
@@ -388,7 +355,7 @@ class CartesianView(flet.Container):
 
             self._update_labels_logic()
             
-            # Use page update if possible
+            
             if self.page:
                 try: self.page.update()
                 except: pass
@@ -397,7 +364,6 @@ class CartesianView(flet.Container):
 
         
     def set_homed_status(self, is_homed):
-        # HARDENING: Ensure boolean
         if isinstance(is_homed, str):
             if is_homed.lower() == "true": is_homed = True
             else: is_homed = False
@@ -441,16 +407,10 @@ class CartesianView(flet.Container):
         self.page.update()
 
     def on_jog_start(self, e, axis, direction):
-        # 1. Check Homing
-        if not self.is_robot_homed:
-            self.show_homing_required_dialog()
-            return
-            
         if self.is_jogging: return
         self.is_jogging = True
         self.active_jog_control = e.control
         
-        # Button styling
         e.control.content.bgcolor = "#111111"
         e.control.content.border = flet.border.all(1, "cyan")
         e.control.content.update()
@@ -461,34 +421,26 @@ class CartesianView(flet.Container):
         if e.control != self.active_jog_control: return
         self.is_jogging = False
         self.active_jog_control = None
-        self.last_jog_time = time.time() # Start debounce timer
-        # Reset styling
+        self.is_jogging = False
+        self.active_jog_control = None
+        self.last_jog_time = time.time()
         if hasattr(e, "control") and e.control:
             e.control.content.bgcolor = "#444444"
             e.control.content.border = flet.border.all(1, "#666")
             e.control.content.update()
 
     def update_from_feedback(self, joint_values: dict):
-        """
-        Updates the display based on feedback from the robot (via main.py).
-        joint_values: dict like {"J1": 10.0, "J2": -5.0, ...} in degrees.
-        """
         try:
-            # Store feedback values for display (in degrees, like JogView)
             for i in range(6):
                 key = f"J{i+1}"
                 if key in joint_values:
                     self.feedback_joints_deg[i] = joint_values[key]
             
-            # Debounce: Do NOT sync commanded_joints during jogging or within 1.5s after
-            # This prevents lagging UART feedback from overwriting our IK-computed targets
             if self.is_jogging:
                 return
             if (time.time() - self.last_jog_time) < 1.5:
                 return
                 
-            # Sync commanded_joints when NOT jogging and robot is stationary
-            # Use a higher threshold to avoid jitter syncs
             feedback_rad = [np.radians(v) for v in self.feedback_joints_deg]
             for i in range(6):
                 if abs(self.commanded_joints[i] - feedback_rad[i]) > np.radians(0.5):
@@ -516,12 +468,10 @@ class CartesianView(flet.Container):
 
         def on_confirm_position(e):
             close_dlg(e)
-            # Use GLOBAL callback to set homing for ALL views
             if hasattr(self, 'on_global_set_homed') and self.on_global_set_homed:
                 self.on_global_set_homed(True)
             else:
-                self.set_homed_status(True)  # Fallback
-            # Log HMS warning - homing skipped
+                self.set_homed_status(True)
             if self.on_error:
                 self.on_error("HMS")
             self.page.snack_bar = flet.SnackBar(flet.Text("Position confirmed manually."), bgcolor="green")
@@ -545,26 +495,27 @@ class CartesianView(flet.Container):
         self.page.update()
 
     def on_safety_click(self, e):
-        # Trigger W2 warning
         if self.on_error:
             self.on_error("W2")
-        # Target: [0, 50, -70, -90, 0, 0] degrees
         target_rad = np.radians([0, -50, 70, 90, 0, 0]).tolist()
         self._animate_move(target_rad)
 
     def on_standby_click(self, e):
-        # Target: All zeros
         target_rad = [0.0] * 6
         self._animate_move(target_rad)
 
     def _animate_move(self, target_joints_rad):
-        """Moves robot to target joints smoothly using current velocity."""
         if self.is_jogging: return
+
+        try:
+            fb_rad = [np.radians(v) for v in self.feedback_joints_deg]
+            if np.linalg.norm(np.array(self.commanded_joints) - np.array(fb_rad)) > 0.1:
+                self.commanded_joints = list(fb_rad)
+        except: pass
+
         self.is_jogging = True
         
         def run():
-            # Standard movement speed: 1.5 rad/s at 100% velocity
-            # USE COPIES to avoid race conditions during iteration
             current_local = np.array(list(self.commanded_joints))
             target = np.array(target_joints_rad)
             
@@ -578,15 +529,13 @@ class CartesianView(flet.Container):
                         self.send_current_pose()
                         break
                     
-                    # Respect current velocity slider
                     factor = self.jog_speed_percent / 100.0
-                    # Max step per 0.05s frame (~1.5 rad/s max speed / 20Hz = 0.075)
                     step_size = min(dist, 0.075 * factor)
                     
                     current_local = current_local + (diff / dist) * step_size
                     self.commanded_joints = current_local.tolist()
                     self.send_current_pose()
-                    time.sleep(0.1) # 10Hz animation step
+                    time.sleep(0.1)
             finally:
                 self.is_jogging = False
                 self.last_jog_time = time.time()
@@ -594,14 +543,12 @@ class CartesianView(flet.Container):
         threading.Thread(target=run, daemon=True).start()
 
     def on_stop_click(self, e):
-        # Trigger W1 warning
         if self.on_error:
             self.on_error("W1")
         self.is_jogging = False
         if self.uart: self.uart.send_message("EGRIP_STOP")
 
     def on_change_tool_click(self, e):
-        """Shows tool selection dialog with images."""
         if not self.page: return
         
         self.tool_change_dialog = None
@@ -730,36 +677,27 @@ class CartesianView(flet.Container):
                     self._update_labels_logic()
                     self.page.update()
             except: pass 
-            time.sleep(0.10) # 10Hz update rate (reduced from 20Hz) 
+            time.sleep(0.10) 
 
     def _update_labels_logic(self):
-        """
-        Use URDF-based FK from KinematicsEngine for display.
-        This ensures consistency with the IK solver and removes DH table dependency.
-        """
         if not self.ik.chain: 
             return
         
         try:
-            # Get TCP matrix from URDF-based FK
             tcp_matrix = self.ik.forward_kinematics(self.commanded_joints)
-            pos = tcp_matrix[:3, 3]  # [x, y, z] in meters
+            pos = tcp_matrix[:3, 3]
             rot = tcp_matrix[:3, :3]
             
-            # Calculate Euler angles (A=Roll, B=Pitch, C=Yaw for xyz convention)
             euler = R.from_matrix(rot).as_euler('xyz', degrees=True)
             
-            # UPDATE UI - position in mm
             self.lbl_cart["X"].value = f"{pos[0]*1000:.2f} mm"
             self.lbl_cart["Y"].value = f"{pos[1]*1000:.2f} mm"
             self.lbl_cart["Z"].value = f"{pos[2]*1000:.2f} mm"
             
-            # Rotation in degrees (A=Roll/X, B=Pitch/Y, C=Yaw/Z)
             self.lbl_cart["A"].value = f"{euler[0]:.2f}°"
             self.lbl_cart["B"].value = f"{euler[1]:.2f}°"
             self.lbl_cart["C"].value = f"{euler[2]:.2f}°"
 
-            # Update Joint displays - use commanded values
             for i, rad_val in enumerate(self.commanded_joints):
                 if i < len(self.lbl_joints):
                     deg_val = np.degrees(rad_val)
@@ -768,41 +706,33 @@ class CartesianView(flet.Container):
         except Exception as e:
             pass
 
-    # --- LOGIKA RUCHU (AGGRESSIVE STABILITY) ---
+    # --- MOTION LOGIC (AGGRESSIVE STABILITY) ---
     def _jog_thread(self, axis, direction):
-        # Parametry "Ultra-Responsive" - ZWIĘKSZONE PRĘDKOŚCI
-        # BASE_STEP_MM: 5.0mm * 10Hz = 50mm/s @ 100%
-        # BASE_STEP_RAD: 0.02rad * 10Hz = ~11.5 deg/s @ 100%
         BASE_STEP_MM = 5.0
-        BASE_STEP_RAD = 0.02  # Faster rotation
+        BASE_STEP_RAD = 0.02
         
-        # Workspace limits (Expanded for pure URDF exploration)
         WORKSPACE_LIMITS = {
-            'x': (-0.700, 0.700),
-            'y': (-0.700, 0.700),
-            'z': (-0.300, 0.900)
+            'x': (-0.500, 0.600),
+            'y': (-0.550, 0.550),
+            'z': (0.000, 0.600)
         }
-        
+
         sign = 1 if direction == "plus" else -1
         
         while self.is_jogging:
             loop_start = time.time()
             
-            # 1. Skalowanie prędkości
             factor = self.jog_speed_percent / 100.0
             step_mm = max(0.2, BASE_STEP_MM * factor)
-            step_rad = max(0.002, BASE_STEP_RAD * factor)  # Lower minimum for rotation
+            step_rad = max(0.002, BASE_STEP_RAD * factor)
             
             if self.ik.chain:
-                # Use RAW joints for calculation
                 current_raw = list(self.commanded_joints)
                 
-                # Get current TCP Pose (4x4)
                 current_tcp_matrix = self.ik.forward_kinematics(current_raw)
                 current_pos = current_tcp_matrix[:3, 3]
                 current_rot = current_tcp_matrix[:3, :3]
                 
-                # Calculate Deltas (Identity Mapping)
                 dx, dy, dz = 0, 0, 0
                 drx, dry, drz = 0, 0, 0
                 
@@ -813,28 +743,32 @@ class CartesianView(flet.Container):
                 elif axis == 'ry': dry = step_rad * sign
                 elif axis == 'rz': drz = step_rad * sign
                 
-                # Apply Deltas to TCP
-                target_pos = current_pos + np.array([dx, dy, dz]) / 1000.0
+                proposed_pos = current_pos + np.array([dx, dy, dz]) / 1000.0
+                target_pos = np.copy(proposed_pos)
+
+                for i, ax_key in enumerate(['x', 'y', 'z']):
+                    mn, mx = WORKSPACE_LIMITS[ax_key]
+                    curr = current_pos[i]
+                    prop = proposed_pos[i]
+                    
+                    if curr < mn:
+                        if prop > curr: target_pos[i] = min(prop, mn) 
+                        else: target_pos[i] = curr
+                    elif curr > mx:
+                        if prop < curr: target_pos[i] = max(prop, mx) 
+                        else: target_pos[i] = curr
+                    else:
+                        target_pos[i] = np.clip(prop, mn, mx)
                 
-                # Enforce workspace limits
-                target_pos[0] = np.clip(target_pos[0], WORKSPACE_LIMITS['x'][0], WORKSPACE_LIMITS['x'][1])
-                target_pos[1] = np.clip(target_pos[1], WORKSPACE_LIMITS['y'][0], WORKSPACE_LIMITS['y'][1])
-                target_pos[2] = np.clip(target_pos[2], WORKSPACE_LIMITS['z'][0], WORKSPACE_LIMITS['z'][1])
-                
-                # ROTATION SCHEME (Local Tool Frame Pivot at Tip):
-                # A (rx): Tool X rotation
-                # B (ry): Tool Y rotation
-                # C (rz): Tool Z rotation
-                
-                if axis == 'rx':  # A = Tool X
+                if axis == 'rx':  
                     delta_rot = R.from_euler('x', drx).as_matrix()
                     target_rot = current_rot @ delta_rot
                 
-                elif axis == 'ry':  # B = Tool Y
+                elif axis == 'ry':  
                     delta_rot = R.from_euler('y', dry).as_matrix()
                     target_rot = current_rot @ delta_rot
                     
-                elif axis == 'rz':  # C = Tool Z
+                elif axis == 'rz':  
                     delta_rot = R.from_euler('z', drz).as_matrix()
                     target_rot = current_rot @ delta_rot
                      
@@ -842,32 +776,34 @@ class CartesianView(flet.Container):
                     target_rot = current_rot
                 
                 try:
-                    # New IK Solver handles tool offset internally!
                     nj_model = self.ik.inverse_kinematics(target_pos, target_rot, current_raw)
                     
-                    # Normalize angles
+                    # --- STRICT VALIDATION ---
+                    test_tcp = self.ik.forward_kinematics(nj_model)
+                    test_pos = test_tcp[:3, 3]
+                    
+                    deviation = np.linalg.norm(test_pos - target_pos)
+                    
+                    if deviation > 0.001: 
+                        if self.on_error:
+                            if not hasattr(self, 'last_reach_warn') or (time.time() - self.last_reach_warn > 2.0):
+                                self.on_error("OOR") 
+                                self.last_reach_warn = time.time()
+                        continue
+                        
                     nj_model = [(q + np.pi) % (2*np.pi) - np.pi for q in nj_model]
                     
-                    # Singularity detection: check individual joint jumps
                     diffs = [abs(nj_model[i] - current_raw[i]) for i in range(6)]
                     max_diff = max(diffs)
                     
-                    # Tighter thresholds for rotation stability
-                    if max_diff < 0.3:  # ~17 degrees - safe movement
+                    if max_diff < 0.15:  
                         self.commanded_joints = nj_model
-                    elif max_diff < 0.6:  # Moderate jump - interpolate to reduce jerk
-                        # Blend: 20% new, 80% old - smoother transition near singularity
-                        blend_factor = 0.2
-                        blended = [current_raw[i] + blend_factor * (nj_model[i] - current_raw[i]) for i in range(6)]
-                        self.commanded_joints = blended
-                    # else: Large jump - reject completely (singularity protection)
                         
                 except:
-                    pass  # IK error - silently skip
+                    pass  
 
             self.send_current_pose()
             
-            # Target: 10Hz (100ms) - Optimized for CPU
             elapsed = time.time() - loop_start
             sleep_time = max(0.01, 0.10 - elapsed)
             time.sleep(sleep_time)

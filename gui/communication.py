@@ -11,15 +11,15 @@ class UARTCommunicator:
         self.serial_connection = None
         self.is_running = False
         self.read_thread = None
-        self.on_data_received = None # Callback
+        self.on_data_received = None 
 
     def find_port(self):
         ports = serial.tools.list_ports.comports()
         available_ports = [p.device for p in ports]
-        # print(f"[UART] Dostępne porty: {available_ports}")
+       
         if available_ports:
             self.port = available_ports[0]
-            # print(f"[UART] Wybrano domyślny port: {self.port}")
+         
             return self.port
         return None
 
@@ -61,7 +61,7 @@ class UARTCommunicator:
 
     def _read_loop(self):
         """
-        Czyta dane w pętli. Zmienione na bardziej niezawodne czytanie.
+        Reads data in a loop. Changed to more reliable reading.
         """
         while self.is_running:
             if not self.is_open():
@@ -69,9 +69,9 @@ class UARTCommunicator:
                 continue
                 
             try:
-                # Sprawdzamy czy są dane w buforze
+              
                 if self.serial_connection.in_waiting > 0:
-                    # Czytamy wszystko co jest
+                
                     raw_data = self.serial_connection.read(self.serial_connection.in_waiting)
                     
                     if raw_data:
@@ -90,7 +90,7 @@ class UARTCommunicator:
             except Exception as e:
                 time.sleep(0.1)
             
-            time.sleep(0.01) # Lekki oddech dla procesora
+            time.sleep(0.01)
 
     def send_message(self, message):
         if not self.is_open(): return False

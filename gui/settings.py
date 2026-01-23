@@ -22,7 +22,7 @@ class SettingsView(flet.Container):
     def __init__(self, uart_communicator):
         super().__init__()
         # --- UI LAYOUT FIXES ---
-        self.expand = True  # Rozciągnij kontener na całe dostępne miejsce
+        self.expand = True  
         self.padding = 10
         
         self.comm = uart_communicator
@@ -95,10 +95,10 @@ class SettingsView(flet.Container):
     def open_homing_window(self, e):
         self.homing_dialog = ft.AlertDialog(
             modal=True,
-            title=ft.Text("Bazowanie..."),
+            title=ft.Text("Homing..."),
             content=ft.Column([
                 ft.ProgressRing(),
-                ft.Text("Proszę czekać...")
+                ft.Text("Please wait...")
             ], height=100),
             actions=[],
         )
@@ -206,7 +206,7 @@ class SettingsView(flet.Container):
         # 3. COLLISION
         if "COLLISION" in clean_str and current_motor_tag in clean_str:
             if hasattr(self, 'stall_status_text') and self.stall_status_text.page:
-                self.stall_status_text.value = f"⚠️ KOLIZJA!"
+                self.stall_status_text.value = f"⚠️ COLLISION!"
                 self.stall_status_text.color = "white"
                 self.stall_status_text.update()
             if hasattr(self, 'stall_status_container') and self.stall_status_container.page:
@@ -288,7 +288,7 @@ class SettingsView(flet.Container):
             time.sleep(0.5)
             e.control.icon = ft.icons.REFRESH; e.control.icon_color = "white"; e.control.update()
 
-        reset_button = ft.IconButton(icon=ft.icons.REFRESH, icon_color="white", bgcolor="blue", tooltip="ODBLOKUJ", on_click=on_reset_click)
+        reset_button = ft.IconButton(icon=ft.icons.REFRESH, icon_color="white", bgcolor="blue", tooltip="UNLOCK", on_click=on_reset_click)
 
         def close_and_refresh(e):
             self.tuning_dialog.open = False
@@ -296,16 +296,16 @@ class SettingsView(flet.Container):
             if self.active_slider_set_id == 4: self._on_slider_set_select(4) 
 
         dialog_content = ft.Column([
-            ft.Text("Wykres obciążenia (Live):", size=14, color="#888"),
+            ft.Text("Load Chart (Live):", size=14, color="#888"),
             ft.Container(content=self.sg_chart, expand=True, padding=ft.padding.only(left=5, top=10, right=10, bottom=10), bgcolor="#222", border_radius=10),
             ft.Divider(color="#444", height=10),
-            ft.Row([ft.Text("Czułość (SGT):", size=16, width=130), self.tuning_slider, ft.Container(content=self.slider_val_text, width=50, alignment=alignment.center_right)], alignment=ft.MainAxisAlignment.CENTER),
-            ft.Row([ft.Text("Próg (Limit):", size=16, color="orange", width=130), self.threshold_slider, ft.Container(content=self.threshold_val_text, width=50, alignment=alignment.center_right)], alignment=ft.MainAxisAlignment.CENTER),
+            ft.Row([ft.Text("Sensitivity (SGT):", size=16, width=130), self.tuning_slider, ft.Container(content=self.slider_val_text, width=50, alignment=alignment.center_right)], alignment=ft.MainAxisAlignment.CENTER),
+            ft.Row([ft.Text("Threshold (Limit):", size=16, color="orange", width=130), self.threshold_slider, ft.Container(content=self.threshold_val_text, width=50, alignment=alignment.center_right)], alignment=ft.MainAxisAlignment.CENTER),
             ft.Divider(color="#444", height=10),
-            ft.Row([ft.Row([self.stall_status_container, reset_button], spacing=5), ft.ElevatedButton("RUCH TESTOWY", icon=ft.icons.SWAP_HORIZ, on_click=self._run_test_motion, style=ft.ButtonStyle(bgcolor=ft.colors.BLUE_700, color="white", shape=ft.RoundedRectangleBorder(radius=8), padding=15), expand=True)], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
+            ft.Row([ft.Row([self.stall_status_container, reset_button], spacing=5), ft.ElevatedButton("TEST MOTION", icon=ft.icons.SWAP_HORIZ, on_click=self._run_test_motion, style=ft.ButtonStyle(bgcolor=ft.colors.BLUE_700, color="white", shape=ft.RoundedRectangleBorder(radius=8), padding=15), expand=True)], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
         ], spacing=5)
 
-        title_row = ft.Row(controls=[ft.Text(f"Tuning StallGuard - Oś J{self.selected_motor_index}", size=20, weight="bold"), ft.IconButton(icon=ft.icons.CLOSE, icon_size=24, tooltip="Zamknij", on_click=close_and_refresh)], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
+        title_row = ft.Row(controls=[ft.Text(f"StallGuard Tuning - Axis J{self.selected_motor_index}", size=20, weight="bold"), ft.IconButton(icon=ft.icons.CLOSE, icon_size=24, tooltip="Close", on_click=close_and_refresh)], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
 
         self.tuning_dialog = ft.AlertDialog(title=title_row, title_padding=ft.padding.only(left=20, right=10, top=10, bottom=0), content=ft.Container(width=850, height=700, content=dialog_content), modal=True)
         self.page.dialog = self.tuning_dialog
@@ -314,7 +314,7 @@ class SettingsView(flet.Container):
 
     def _reset_stall_status(self, e):
         if hasattr(self, 'stall_status_text') and self.stall_status_text.page:
-            self.stall_status_text.value = "STATUS: OK (Brak kolizji)"
+            self.stall_status_text.value = "STATUS: OK (No collision)"
             self.stall_status_text.color = "green"
             self.stall_status_text.update()
         if hasattr(self, 'stall_status_container') and self.stall_status_container.page:
@@ -480,7 +480,7 @@ class SettingsView(flet.Container):
         ], alignment=MainAxisAlignment.CENTER, spacing=20)
 
         dialog_content = Column([
-            Text("Wykres obciążenia (Live):", size=14, color="#888"),
+            Text("Load Chart (Live):", size=14, color="#888"),
             Container(
                 content=self.egrip_chart, 
                 height=150,
@@ -490,7 +490,7 @@ class SettingsView(flet.Container):
             ),
             ft.Divider(color="#444", height=2),
             Row([
-                Text("Aktualna wartość SG:", size=14), 
+                Text("Current SG Value:", size=14), 
                 self.egrip_sg_result_text
             ], alignment=MainAxisAlignment.SPACE_BETWEEN),
             ft.Divider(color="#444", height=2),
@@ -725,12 +725,12 @@ class SettingsView(flet.Container):
 
     def _get_default_settings(self):
         return {
-            1: { 1: [2221, 5446, 17428, 239873, 1132], 2: [13, 24, 6], 3: [269115, 4455, 0.1], 4: [16, 0] },
-            2: { 1: [2295, 4570, 19092, 262660, 1357], 2: [16, 24, 6], 3: [200000, 10000, -9.1], 4: [48, 0] },
-            3: { 1: [5231, 10128, 23904, 325479, 2202], 2: [12, 22, 6], 3: [200000, 10000, 3.5], 4: [22, 9] },
-            4: { 1: [6006, 12649, 29083, 400000, 1970], 2: [12, 19, 6], 3: [300000, 5000, -4.0], 4: [20, 11] },
-            5: { 1: [5231, 10250, 30000, 400000, 1982], 2: [15, 20, 6], 3: [200000, 10000, -3.0], 4: [31, 9] },
-            6: { 1: [6319, 11767, 30000, 400000, 2230], 2: [4, 11, 6], 3: [200000, 10000, 3.0], 4: [32, 0] }
+            1: { 1: [2000, 5000, 10000, 250000, 2000], 2: [13, 24, 6], 3: [269115, 4455, 0.1], 4: [16, 0] },
+            2: { 1: [2000, 5000, 8000, 200000, 2000], 2: [16, 24, 6], 3: [200000, 10000, -9.1], 4: [48, 0] },
+            3: { 1: [2000, 5000, 8000, 200000, 2000], 2: [12, 22, 6], 3: [200000, 10000, 3.5], 4: [22, 9] },
+            4: { 1: [3000, 10000, 15000, 400000, 3000], 2: [12, 19, 6], 3: [300000, 5000, -4.0], 4: [20, 11] },
+            5: { 1: [3000, 10000, 15000, 400000, 3000], 2: [15, 20, 6], 3: [200000, 10000, -3.0], 4: [31, 9] },
+            6: { 1: [3000, 8000, 12000, 250000, 3000], 2: [4, 11, 6], 3: [200000, 10000, 3.0], 4: [32, 0] }
         }
 
     def _load_settings(self):
@@ -790,7 +790,7 @@ class SettingsView(flet.Container):
 
     def _get_default_gripper_settings(self):
         return {
-            "VGrip": [-40, -20, 1],
+            "VGrip": [-40, -20],
             "SGrip": [4, 11, 91931]
         }
 
@@ -871,8 +871,8 @@ class SettingsView(flet.Container):
 
     def _get_gripper_config(self, image_name):
         if image_name == "render2.png": 
-            vals = self.gripper_settings_data.get("VGrip", [-40, -20, 1])
-            return { "title": "ROTARY GRIPPER", "image": "Gripper1.png", "sliders": [("Pump On Pressure [kPa]", -50, -10, vals[0]), ("Pump Off Pressure [kPa]", -40, 0, vals[1]), ("Valve Delay [s]", 0, 3, vals[2])] }
+            vals = self.gripper_settings_data.get("VGrip", [-40, -20])
+            return { "title": "VACUUM GRIPPER", "image": "Gripper1.png", "sliders": [("Pump On Pressure [kPa]", -50, -10, vals[0]), ("Pump Off Pressure [kPa]", -40, 0, vals[1])] }
         elif image_name == "render3.png": 
             vals = self.gripper_settings_data.get("SGrip", [10, 20, 5000, 0, 10])
             return { "title": "ELECTRIC GRIPPER", "image": "Gripper2.png", "sliders": [("IHOLD", 0, 31, vals[0]), ("IRUN", 0, 31, vals[1]), ("Grip Speed", 200, 100000, vals[2])] }
@@ -904,18 +904,17 @@ class SettingsView(flet.Container):
             self.motor_display = Text("Motor: J1", color="white", size=18, weight="bold")
             send_save_button = ElevatedButton(text="Send & Save", height=40, expand=True, style=flet.ButtonStyle(bgcolor=colors.GREEN_700, color=colors.WHITE, shape=flet.RoundedRectangleBorder(radius=8)), on_click=self._on_send_and_save_click)
             
-            # FIXED LAYOUT STRUCTURE
+            # LAYOUT STRUCTURE
             return Row(controls=[
-                # LEFT: Fixed width 140
                 Container(content=Column(controls=btn_ctrls, spacing=10, expand=True), **podramka_style, width=140, expand=False),
                 
-                # MIDDLE: Takes remaining space (expand=True)
+                # MIDDLE
                 Container(content=Column(controls=[
                     Container(content=top_toolbar, height=60, bgcolor="#2D2D2D", border_radius=10),
                     self.sliders_column_container
                 ], spacing=10, expand=True), **{**podramka_style}, expand=True),
                 
-                # RIGHT: Fixed width 240
+                # RIGHT
                 Container(content=Column(controls=[
                     Container(content=self.motor_display, height=50, alignment=alignment.center),
                     Container(content=Image(src="stepper60.png", fit=flet.ImageFit.CONTAIN, expand=True), **podramka_obrazkowa_style, expand=True),

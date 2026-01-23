@@ -5,9 +5,6 @@ class StatusView(flet.Container):
     def __init__(self): 
         super().__init__()
         
-        # NOTE: self.uart and parse_data removed.
-        # Now main.py controls this view using update_status().
-
         # --- MAIN SETTINGS ---
         self.expand = True
         self.padding = 5
@@ -36,9 +33,9 @@ class StatusView(flet.Container):
                 
                 # --- 3. PNEUMATICS ---
                 self._create_header("PNEUMATICS"),
-                self._create_status_row("Pressure", "0.00 kPa", color=colors.CYAN_400, key="CISNIENIE"),
-                self._create_status_row("Pump", "OFF", color=colors.RED_400, key="POMPA"),
-                self._create_status_row("Valve", "OPEN", color=colors.GREEN_400, key="ZAWOR"),
+                self._create_status_row("Pressure", "0.00 kPa", color=colors.CYAN_400, key="PRESSURE"),
+                self._create_status_row("Pump", "OFF", color=colors.RED_400, key="PUMP"),
+                self._create_status_row("Valve", "OPEN", color=colors.GREEN_400, key="VALVE"),
 
                 # --- 4. GENERAL STATUS ---
                 self._create_header("SYSTEM STATUS"),
@@ -99,12 +96,10 @@ class StatusView(flet.Container):
         )
 
     # ======================================================================
-    # === UPDATE API (Called from main.py) ===
+    # === UPDATE API ===
     # ======================================================================
     def update_status(self, parameter_name, new_value, new_color=None):
-        """
-        Called by main.py upon receiving UART data.
-        """
+
         if parameter_name in self.value_controls:
             control = self.value_controls[parameter_name]
             control.value = str(new_value)
@@ -134,7 +129,7 @@ class StatusView(flet.Container):
             text_align=flet.TextAlign.CENTER
         )
         
-        # If key is not provided, use label as key
+ 
         dict_key = key if key is not None else label_text
         self.value_controls[dict_key] = value_display
 

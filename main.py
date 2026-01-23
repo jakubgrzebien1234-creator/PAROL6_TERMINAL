@@ -4,7 +4,7 @@ import os
 import threading
 import serial.tools.list_ports 
 
-# --- Import widoków ---
+# --- View Imports ---
 try:
     from gui.cartesian import CartesianView
     from gui.jog import JogView
@@ -18,15 +18,15 @@ except ImportError as e:
 from PIL import Image
 
 def main(page: ft.Page):
-    # --- Ustawienia strony ---
+    # --- Page Settings ---
     page.title = "PAROL6 Operator Panel by Jakub Grzebień"
     page.theme_mode = ft.ThemeMode.DARK 
     
-    # Ustawienia rozmiaru okna
-   # page.window_full_screen = True
+    # Window size settings
+    #page.window_full_screen = True
     #page.window_frameless = True 
     
-    # Inicjalizacja komunikatora
+    # Communicator initialization
     if UARTCommunicator:
         communicator = UARTCommunicator()
     else:
@@ -39,19 +39,20 @@ def main(page: ft.Page):
         communicator = DummyComm()
     
     page.bgcolor = "#1C1C1C"
-    page.padding = 0  # Padding 0, żeby Stack wypełnił całe okno
+    page.bgcolor = "#1C1C1C"
+    page.padding = 0  
     
-    # Ustawienie folderu assets
+    # Assets folder setup
     assets_dir = os.path.join(os.getcwd(), "resources")
     page.assets_dir = assets_dir
     
-    # --- DEFINICJE KOLORÓW I STYLÓW ---
+    # --- COLOR AND STYLE DEFINITIONS ---
     COLOR_RAMKA_GLOWNA = "#2D2D2D" 
     COLOR_OBRYSOW = "#555555" 
     
 
 
-    # ... (Styles defined previously, keeping definitions clean)
+ 
     
     STYL_RAMKI = {
         "bgcolor": COLOR_RAMKA_GLOWNA,
@@ -61,34 +62,31 @@ def main(page: ft.Page):
         "padding": 10
     }
 
-    # Słownik widoków
+    # Views dictionary
     views = {}
 
-    # --- EKRAN ESTOP (Overlay) ---
-    # To jest warstwa, która przykryje wszystko
+    # --- ESTOP SCREEN (Overlay) ---
     estop_overlay = ft.Container(
         content=ft.Column(
             controls=[
                 ft.Icon(name=ft.icons.WARNING_ROUNDED, color="white", size=80),
                 ft.Text("EMERGENCY STOP ACTIVE", size=50, weight=ft.FontWeight.BOLD, color="white", text_align=ft.TextAlign.CENTER),
                 ft.Image(src="ESTOP.png", width=250, height=250, fit=ft.ImageFit.CONTAIN, error_content=ft.Text("BRAK ZDJĘCIA ESTOP", color="white")),
-                ft.Text("System Halted. Release E-Stop button to resume.", size=20, color="white")
+                ft.Text("System Stopped. Release E-Stop button to resume.", size=20, color="white")
             ],
             alignment=ft.MainAxisAlignment.CENTER,
             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
             spacing=20
         ),
-        bgcolor=ft.colors.with_opacity(0.95, "#B00020"), # Czerwone tło, lekko przezroczyste lub pełne
+        bgcolor=ft.colors.with_opacity(0.95, "#B00020"), 
         alignment=ft.alignment.center,
-        visible=False, # Domyślnie ukryte
+        visible=False, 
         expand=True,
         padding=20,
-        # Zablokowanie interakcji z tym co pod spodem:
         on_click=lambda e: None 
     )
 
-    # --- 1. LOGIKA I UI DLA PORTU SZEREGOWEGO ---
-    
+    # --- 1. SERIAL PORT LOGIC AND UI ---
     dd_ports = ft.Dropdown(
         width=120,          
         text_size=14,
@@ -151,11 +149,11 @@ def main(page: ft.Page):
                         if "SETTINGS" in views and views["SETTINGS"]:
                             views["SETTINGS"].upload_configuration(page)
                         
-                        # Pokaż dialog wyboru narzędzia po synchronizacji
+                        # Show tool selection dialog after sync
                         time.sleep(0.5)
                         if "JOG" in views and views["JOG"]:
                             try:
-                                # Wywołaj dialog zmiany narzędzia
+                                # Call tool change dialog
                                 views["JOG"].on_change_tool_click(None)
                             except Exception as ex:
                                 pass
@@ -183,7 +181,7 @@ def main(page: ft.Page):
         alignment=ft.MainAxisAlignment.CENTER
     )
 
-    # --- 2. KONTROLKI ZEGARA I DATY ---
+    # --- 2. CLOCK AND DATE CONTROLS ---
     clock_text = ft.Text(value="00:00:00", size=20, weight=ft.FontWeight.BOLD, color="white")
     date_text = ft.Text(value="DD.MM.RRRR", size=20, weight=ft.FontWeight.NORMAL, color="white")
 
@@ -198,13 +196,13 @@ def main(page: ft.Page):
         spacing=0
     )
     
-    # --- GŁÓWNY HEADER ---
+    # --- MAIN HEADER ---
     header_content = ft.Row(
         controls=[
             ft.Container(
                 content=ft.Row(
                     controls=[at_logo, powered_by_logo],
-                    spacing=80,
+                    spacing=20,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER
                 ),
                 alignment=ft.alignment.center_left,
@@ -212,8 +210,17 @@ def main(page: ft.Page):
             ),
             
             ft.Container(
-                content=parol_label,
-                alignment=ft.alignment.center,
+                content=ft.Column(
+                    controls=[
+                        parol_label,
+                        ft.Text("MADE BY JAKUB GRZEBIEŃ", size=10, color="white", weight=ft.FontWeight.BOLD)
+                    ],
+                    spacing=-5, 
+                    alignment=ft.MainAxisAlignment.CENTER,
+                    horizontal_alignment=ft.CrossAxisAlignment.CENTER
+                ),
+                alignment=ft.alignment.center, 
+                margin=ft.margin.only(top=-5), 
                 expand=2, 
             ),
 
@@ -253,20 +260,18 @@ def main(page: ft.Page):
         **STYL_RAMKI_TOP 
     )
     
-    # --- INICJALIZACJA WIDOKÓW ---
-
-    # 2. ŚRODEK (Przeniesione tutaj, aby było dostępne dla helperów)
+    # --- VIEW INITIALIZATION ---
     frame_middle = ft.Container(
         content=None, 
         expand=1,
         **STYL_RAMKI 
     )
     
-    # Zmienne globalne dla obsługi błędów
+    # Global variables for error handling
     footer_buttons_map = {} 
     current_alert_level = "NONE"
 
-    # Zmienne globalne do animacji
+    # Global variables for animation
     animation_thread = None
     stop_animation = False
 
@@ -279,7 +284,7 @@ def main(page: ft.Page):
         state_toggle = False
         
         while not stop_animation and current_alert_level != "NONE":
-            # Wybór koloru bazowego
+            # Base color selection
             if current_alert_level == "ERROR":
                 color_on = ft.colors.RED_500
                 color_off = ft.colors.RED_900 if page.theme_mode == ft.ThemeMode.DARK else ft.colors.RED_100
@@ -291,7 +296,7 @@ def main(page: ft.Page):
             else:
                 break
             
-            # Animacja pulsowania (zmiana koloru ramki)
+            # Pulse animation (border color change)
             current_color = color_on if state_toggle else color_off
             
             error_btn.style.side = ft.BorderSide(width, current_color)
@@ -299,50 +304,42 @@ def main(page: ft.Page):
             try:
                 error_btn.update()
             except:
-                break # Wyjście jeśli np. okno zamknięte
+                break 
                 
             state_toggle = not state_toggle
-            time.sleep(0.5) # Częstotliwość pulsowania
+            time.sleep(0.5) 
             
-        # Po zakończeniu pętli - czyścimy styl
-        # Po zakończeniu pętli - czyścimy styl
         error_btn.style.side = ft.BorderSide(0, ft.colors.TRANSPARENT)
         try:
             error_btn.update()
         except: pass
 
     def update_error_button_style(level):
-        # Ta funkcja teraz tylko zarządza wątkiem animacji
         nonlocal animation_thread, stop_animation
         
-        # Pobieramy przycisk dynamicznie ze mapy
         error_btn = footer_buttons_map.get("ERRORS")
         if not error_btn: 
             return
 
         if level == "NONE":
-            # Zatrzymujemy animację
+
             stop_animation = True
             if animation_thread and animation_thread.is_alive():
                 animation_thread.join(timeout=1.0)
             
-            # Resetujemy styl "na sztywno" na wszelki wypadek
             error_btn.style.side = ft.BorderSide(0, ft.colors.TRANSPARENT)
             error_btn.update()
             
-        else:
-            # Uruchamiamy animację jeśli nie działa
+
             if animation_thread is None or not animation_thread.is_alive():
                 stop_animation = False
                 animation_thread = threading.Thread(target=animate_button_loop, daemon=True)
                 animation_thread.start()
             else:
-                # Jeśli wątek już działa, to pętla sama zaktualizuje kolor 
-                # na podstawie zmiennej globalnej current_alert_level
                 pass
 
     def set_controls_locked(is_locked):
-        """Blokuje/Odblokowuje widoki sterowania"""
+        """Locks/Unlocks control views"""
         if "JOG" in views:
             if hasattr(views["JOG"], "set_locked"):
                 views["JOG"].set_locked(is_locked)
@@ -355,27 +352,25 @@ def main(page: ft.Page):
             else:
                 views["CARTESIAN"].disabled = is_locked 
                 
-        # Wymuś update widoku środkowego
+        # Force middle view update
         if frame_middle.page:
             frame_middle.update()
 
-    # Callback do zmiany stanu błędu - WŁAŚCIWY
+
     def update_global_error_state(level):
         nonlocal current_alert_level
         
         if level == "ERROR":
             current_alert_level = "ERROR"
-            set_controls_locked(True) # BLOKADA STEROWANIA
+            set_controls_locked(True) 
         elif level == "WARNING":
             if current_alert_level != "ERROR":
                 current_alert_level = "WARNING"
                 set_controls_locked(False) 
         elif level == "NONE":
             current_alert_level = "NONE"
-            set_controls_locked(False) # ODBLOKOWANIE STEROWANIA
+            set_controls_locked(False) 
             
-            # Reset wartości "Motor Connected" w zakładce Status na True
-            # ponieważ Error Reset oznacza, że zakładamy, że wszystko jest naprawione
             if "STATUS" in views and views["STATUS"]:
                 for i in range(1, 7):
                     views["STATUS"].update_status(f"M{i}_CONN", "True", ft.colors.GREEN_400)
@@ -388,7 +383,7 @@ def main(page: ft.Page):
             views["STATUS"].update_status(key, value, color)
 
     def global_error_handler(error_code):
-        """Funkcja obsługująca błędy z widoków JOG/CARTESIAN"""
+        """Function handling errors from JOG/CARTESIAN views"""
         if "ERRORS" in views and views["ERRORS"]:
             views["ERRORS"].send_error_code(error_code)
 
@@ -421,14 +416,14 @@ def main(page: ft.Page):
             views["CARTESIAN"].ik.set_tool(tool_name)
             views["CARTESIAN"]._update_labels_logic()
 
-    # Inicjalizujemy widoki - ERRORS najpierw, żeby był dostępny dla innych
+    # Initialize views - ERRORS first to be available for others
     if ErrorsView:
-        # Przekazujemy callback do ErrorsView
+        # Pass callback to ErrorsView
         views["ERRORS"] = ErrorsView(uart_communicator=communicator, on_status_change=update_global_error_state)
     if JogView:
         views["JOG"] = JogView(uart_communicator=communicator, on_status_update=global_status_updater, on_error=global_error_handler)
-        views["JOG"].on_global_set_homed = global_set_homed  # Add callback
-        views["JOG"].on_global_set_tool = global_set_tool    # Add tool callback
+        views["JOG"].on_global_set_homed = global_set_homed  
+        views["JOG"].on_global_set_tool = global_set_tool    
     if CartesianView:
         views["CARTESIAN"] = CartesianView(
             urdf_path="resources/PAROL6.urdf",
@@ -436,8 +431,8 @@ def main(page: ft.Page):
             uart_communicator=communicator,
             on_error=global_error_handler
         )
-        views["CARTESIAN"].on_global_set_homed = global_set_homed  # Add callback
-        views["CARTESIAN"].on_global_set_tool = global_set_tool    # Add tool callback
+        views["CARTESIAN"].on_global_set_homed = global_set_homed  
+        views["CARTESIAN"].on_global_set_tool = global_set_tool   
     if SettingsView:
         views["SETTINGS"] = SettingsView(uart_communicator=communicator)
     if StatusView:
@@ -445,37 +440,36 @@ def main(page: ft.Page):
 
     def handle_uart_data(data_string):
             """
-            Główna funkcja parsująca dane z UART w main.py
+            Main UART data parsing function in main.py
             """
             data_string = data_string.strip()
             if not data_string: return
             # ==========================================================
-            # 0. OBSŁUGA ESTOP
+            # 0. ESTOP HANDLING
             # ==========================================================
             if "ESTOP_TRIGGER" in data_string:
-                # 1. ZAMYKANIE OKNA BAZOWANIA W SETTINGS
+                # 1. CLOSE HOMING WINDOW IN SETTINGS
                 if "SETTINGS" in views and views["SETTINGS"]:
                     try:
                         views["SETTINGS"].close_homing_dialog()
                     except Exception:
                         pass
 
-                # 2. ZAMYKANIE OKNA BAZOWANIA W JOG
+                # 2. CLOSE HOMING WINDOW IN JOG
                 if "JOG" in views and views["JOG"]:
                     try:
-                        # Ustawiamy status na False (homing przerwany) - to zamknie okno
                         views["JOG"].set_homed_status(False)
                     except Exception:
                         pass
                 
-                # 3. Reset dla CARTESIAN
+                # 3. Reset for CARTESIAN
                 if "CARTESIAN" in views and views["CARTESIAN"]:
                     try:
                         views["CARTESIAN"].set_homed_status(False)
                     except Exception:
                         pass
 
-                # 3. Pokaż czerwoną nakładkę ESTOP
+                # 3. Show red ESTOP overlay
                 estop_overlay.visible = True
                 page.update()
                 
@@ -491,7 +485,7 @@ def main(page: ft.Page):
                 return
 
             # ==========================================================
-            # 2. HOMING I ODBLOKOWANIE (Z DIAGNOSTYKĄ)
+            # 2. HOMING AND UNLOCKING (WITH DIAGNOSTICS)
             # ==========================================================
             if "HOMING_COMPLETE_OK" in data_string:
                 
@@ -507,7 +501,6 @@ def main(page: ft.Page):
                 if "CARTESIAN" in views and views["CARTESIAN"]:
                     views["CARTESIAN"].set_homed_status(True)
                     
-                    # Jeśli aktywny jest chwytak elektryczny - zamknij go po homingu
                     if hasattr(views["CARTESIAN"], 'ik') and views["CARTESIAN"].ik:
                         current_tool = getattr(views["CARTESIAN"].ik, 'current_tool', None)
                         if current_tool == "CHWYTAK_DUZY":
@@ -520,14 +513,14 @@ def main(page: ft.Page):
                 return
 
             # ==========================================================
-            # 3. OBSŁUGA TUNINGU I DIAGNOSTYKI SILNIKÓW
+            # 3. MOTOR TUNING AND DIAGNOSTICS HANDLING
             # ==========================================================
             if "SGRESULT" in data_string or "COLLISION" in data_string:
                 if "SETTINGS" in views and views["SETTINGS"]:
                     try: views["SETTINGS"].handle_stall_alert(data_string)
                     except: pass
                 if "COLLISION" in data_string and "ERRORS" in views and views["ERRORS"]:
-                    views["ERRORS"].add_log("WARNING", f"Kolizja/Utyk: {data_string}")
+                    views["ERRORS"].add_log("WARNING", f"Collision/Stall: {data_string}")
                 return
 
             if "_DBG" in data_string:
@@ -549,7 +542,7 @@ def main(page: ft.Page):
                     try: views["SETTINGS"].handle_stall_alert(data_string)
                     except: pass
                 if "ERRORS" in views and views["ERRORS"]:
-                    views["ERRORS"].add_log("WARNING", f"Wykryto utyk: {data_string}")
+                    views["ERRORS"].add_log("WARNING", f"Stall detected: {data_string}")
                 return
 
             # ==========================================================
@@ -576,19 +569,19 @@ def main(page: ft.Page):
                 return
             if "VAC_ON" in data_string:
                 if "STATUS" in views and views["STATUS"]:
-                    views["STATUS"].update_status("Pompa", "WŁĄCZONA", ft.colors.GREEN_400)
+                    views["STATUS"].update_status("PUMP", "ON", ft.colors.GREEN_400)
                 return
             if "VAC_OFF" in data_string:
                 if "STATUS" in views and views["STATUS"]:
-                    views["STATUS"].update_status("Pompa", "WYŁĄCZONA", ft.colors.RED_400)
+                    views["STATUS"].update_status("PUMP", "OFF", ft.colors.RED_400)
                 return
             if "VALVEON" in data_string:
                 if "STATUS" in views and views["STATUS"]:
-                    views["STATUS"].update_status("Zawór", "ZAMKNIĘTY", ft.colors.ORANGE_400)
+                    views["STATUS"].update_status("VALVE", "CLOSED", ft.colors.ORANGE_400)
                 return
             if "VALVEOFF" in data_string:
                 if "STATUS" in views and views["STATUS"]:
-                    views["STATUS"].update_status("Zawór", "OTWARTY", ft.colors.GREEN_400)
+                    views["STATUS"].update_status("VALVE", "OPEN", ft.colors.GREEN_400)
                 return
 
             # ==========================================================
@@ -598,10 +591,9 @@ def main(page: ft.Page):
             if data_string.startswith("P:"):
                 try:
                     pressure_val = data_string[2:].strip()
-                    # Optional: Add validation if it's a number
                     float(pressure_val) 
                     if "STATUS" in views and views["STATUS"]:
-                        views["STATUS"].update_status("CISNIENIE", f"{pressure_val} kPa", ft.colors.CYAN_400)
+                        views["STATUS"].update_status("PRESSURE", f"{pressure_val} kPa", ft.colors.CYAN_400)
                 except ValueError:
                     pass
                 return
@@ -629,7 +621,7 @@ def main(page: ft.Page):
                     return
 
             # ==========================================================
-            # 8. OBSŁUGA DANYCH PROT_ (Temperatury i Zasilanie)
+            # 8. PROT_ DATA HANDLING (Temperatures and Power)
             # ==========================================================
             # Format: PROT_p3v3,p5v,pok,pstat,t1,t2,t3,t4
             if data_string.startswith("PROT_"):
@@ -691,7 +683,7 @@ def main(page: ft.Page):
                 return
 
             # ==========================================================
-            # 5. POZYCJE OSI (JOG & CARTESIAN - GLOBALNE)
+            # 5. AXIS POSITIONS (JOG & CARTESIAN - GLOBAL)
             # ==========================================================
             if data_string.startswith("A_"):
                 try:
@@ -728,7 +720,7 @@ def main(page: ft.Page):
                 return
 
             # ==========================================================
-            # 6. BŁĘDY OGÓLNE
+            # 6. GENERAL ERRORS
             # ==========================================================
             if data_string.startswith("ERROR_"):
                 if "ERRORS" in views and views["ERRORS"]:
@@ -748,7 +740,7 @@ def main(page: ft.Page):
                 return 
 
             # ==========================================================
-            # 9. INNE FORMATY (Zabezpieczenie)
+            # 9. OTHER FORMATS (Safety)
             # ==========================================================
             if any(x in data_string for x in ["J1", "J2", "J3", "J4", "J5", "J6"]) and \
                any(x in data_string for x in ["_", ":", "="]):
@@ -759,16 +751,16 @@ def main(page: ft.Page):
 
     communicator.on_data_received = handle_uart_data
     
-    # 2. ŚRODEK - definicja frame_middle przeniesiona wyżej
+    # 2. MIDDLE 
 
-    # --- 3. DÓŁ (Stopka) ---
+    # --- 3. BOTTOM (Footer) ---
     def change_mode_clicked(e):
         mode_name = e.control.data
         
         if mode_name in views:
             frame_middle.content = views[mode_name]
         else:
-            frame_middle.content = ft.Text(f"Brak widoku: {mode_name}", size=30, color="red")
+            frame_middle.content = ft.Text(f"View missing: {mode_name}", size=30, color="red")
             
         if mode_name == "SETTINGS" and "SETTINGS" in views:
             views["SETTINGS"].reset_view()
@@ -784,7 +776,7 @@ def main(page: ft.Page):
         ("ERRORS", "ERRORS.png")
     ]
     
-    # footer_buttons_map zdefiniowane wyżej
+    # footer_buttons_map defined above
     
     footer_buttons = []
     
@@ -811,58 +803,43 @@ def main(page: ft.Page):
         footer_buttons.append(btn)
         footer_buttons_map[name] = btn
 
-    # Referencja do głównego przycisku błędów nie jest tu potrzebna (używamy mapy dynamicznie)
-
-    # Funkcje update_error_button_style i set_controls_locked zdefiniowane wyżej
-
-    
-    # Aktualizacja logiki kliknięcia w przycisk
-    # Musimy nadpisać change_mode_clicked aby obsłużyć reset WARNING
     
     def wrapped_change_mode_clicked(e):
         mode_name = e.control.data
         
-        # Jeśli wchodzimy w ERRORS i mamy WARNING -> Resetujemy do NONE
+      
         if mode_name == "ERRORS":
             nonlocal current_alert_level
             if current_alert_level == "WARNING":
-                # Resetujemy stan wizualny, ale ErrorsView nadal ma historię
                 update_global_error_state("NONE")
         
-        # --- SYNC JOINTS WHEN SWITCHING BETWEEN JOG AND CARTESIAN ---
-        # Both views now use URDF-based kinematics - NO sign inversion needed!
+        
         import numpy as np
         
         if mode_name == "CARTESIAN" and "JOG" in views and views["JOG"] and "CARTESIAN" in views and views["CARTESIAN"]:
-            # Sync from JOG to CARTESIAN: direct conversion (degrees to radians)
-            # Only sync if JOG has valid data to avoid overwriting with zeros
+
             if views["JOG"].initial_sync_done:
                 jog_joints = views["JOG"].internal_target_values
                 cartesian_joints = [np.radians(jog_joints.get(f"J{i+1}", 0.0)) for i in range(6)]
                 views["CARTESIAN"].commanded_joints = cartesian_joints
-            # print(f"[MAIN] Synced JOG -> CARTESIAN: {cartesian_joints}")
+ 
             
         elif mode_name == "JOG" and "CARTESIAN" in views and views["CARTESIAN"] and "JOG" in views and views["JOG"]:
-            # Sync from CARTESIAN to JOG: direct conversion (radians to degrees)
+        
             cartesian_joints = views["CARTESIAN"].commanded_joints
             for i in range(6):
                 deg_val = np.degrees(cartesian_joints[i])
                 views["JOG"].internal_target_values[f"J{i+1}"] = deg_val
-                views["JOG"].current_raw_values[f"J{i+1}"] = deg_val  # Also update DISPLAY source!
-            views["JOG"].initial_sync_done = True  # Mark as synced
-            # Trigger display update
+                views["JOG"].current_raw_values[f"J{i+1}"] = deg_val  
+            views["JOG"].initial_sync_done = True  
             views["JOG"]._calculate_forward_kinematics()
             if views["JOG"].page:
                 views["JOG"].page.update()
-            # print(f"[MAIN] Synced CARTESIAN -> JOG: {views['JOG'].internal_target_values}")
-        
-        # Wywołanie oryginalnej logiki zmiany widoku
-        # Skopiowana logika change_mode (prościej niż wywoływać funkcję z wrapper)
         
         if mode_name in views:
             frame_middle.content = views[mode_name]
         else:
-            frame_middle.content = ft.Text(f"Brak widoku: {mode_name}", size=30, color="red")
+            frame_middle.content = ft.Text(f"View missing: {mode_name}", size=30, color="red")
             
         if mode_name == "SETTINGS" and "SETTINGS" in views:
             views["SETTINGS"].reset_view()
@@ -870,7 +847,6 @@ def main(page: ft.Page):
         frame_middle.alignment = ft.alignment.center
         page.update()
 
-    # Podmieniamy handler w przyciskach
     for btn in footer_buttons:
         btn.on_click = wrapped_change_mode_clicked
 
@@ -880,34 +856,31 @@ def main(page: ft.Page):
         **STYL_RAMKI 
     )
 
-    # --- ZŁOŻENIE GŁÓWNEGO LAYOUTU W COLUMN ---
-    # Musimy to zgrupować, żeby potem wrzucić do Stacka POD overlay estopa
     main_layout_column = ft.Column(
         controls=[frame_top, frame_middle, frame_bottom],
         expand=True,
         spacing=10
     )
     
-    # Dodajemy padding do głównego kontenera aplikacji, 
-    # żeby zachować marginesy (10px) z Twojego oryginału, ale nie dla ESTOP
+
     main_layout_container = ft.Container(
         content=main_layout_column,
         padding=10,
         expand=True
     )
 
-    # --- GLÓWNY STACK (WARSTWY) ---
+    # --- MAIN STACK (LAYERS) ---
     root_stack = ft.Stack(
         controls=[
-            main_layout_container, # Warstwa 0: Aplikacja
-            estop_overlay          # Warstwa 1: ESTOP (nad aplikacją)
+            main_layout_container, # Layer 0: Application
+            estop_overlay          # Layer 1: ESTOP (above application)
         ],
         expand=True
     )
 
     page.add(root_stack)
     
-    # --- Wątek zegara ---
+    # --- Clock Thread ---
     def clock_updater():
         while True:
             now_time = time.strftime("%H:%M:%S")
@@ -931,19 +904,19 @@ def main(page: ft.Page):
     t = threading.Thread(target=clock_updater, daemon=True)
     t.start()
     
-    # Ustawienie domyślnego widoku
+    # Default view setup
     if "JOG" in views:
         frame_middle.content = views["JOG"]
     else:
-        frame_middle.content = ft.Text("Widok JOG niedostępny", color="red")
+        frame_middle.content = ft.Text("JOG view unavailable", color="red")
         
     frame_middle.alignment = ft.alignment.center
 
     page.update()
 
-# --- Uruchomienie aplikacji ---
+# --- App Start ---
 if __name__ == "__main__":
-    # Obsługa folderów i placeholderów
+    # Folder and placeholder handling
     resources_dir = "resources"
     os.makedirs(resources_dir, exist_ok=True)
     
@@ -952,7 +925,7 @@ if __name__ == "__main__":
     init_py = os.path.join(gui_dir, "__init__.py")
     if not os.path.exists(init_py): open(init_py, 'a').close()
     
-    # Generowanie placeholdera dla AT
+    # Generating placeholder for AT
     at_img_path = os.path.join(resources_dir, "AT.png")
     if not os.path.exists(at_img_path) and Image:
         img = Image.new('RGB', (100, 100), color="#0055A4")
@@ -960,18 +933,18 @@ if __name__ == "__main__":
         img.paste(img_draw, (25, 25))
         img.save(at_img_path)
         
-    # Generowanie placeholdera dla PoweredBy
+    # Generating placeholder for PoweredBy
     poweredby_img_path = os.path.join(resources_dir, "poweredby.png")
     if not os.path.exists(poweredby_img_path) and Image:
         Image.new('RGB', (200, 80), color="purple").save(poweredby_img_path)
 
-    # Generowanie placeholdera dla ESTOP (jeśli nie masz pliku)
+    # Generating placeholder for ESTOP (if no file)
     estop_img_path = os.path.join(resources_dir, "ESTOP.png")
     if not os.path.exists(estop_img_path) and Image:
-        # Czerwony kwadrat z napisem STOP (symulacja)
+        # Red square with STOP text (simulation)
         Image.new('RGB', (300, 300), color="#FF0000").save(estop_img_path)
 
-    # Generowanie przycisków
+    # Generating buttons
     button_image_files = ["JOG.png", "CARTESIAN.png", "SETTINGS.png", "STATUS.png", "ERRORS.png"]
     button_colors = ["#FF6347", "#1E90FF", "#32CD32", "#FFD700", "#DC143C"]
     for img_file, color in zip(button_image_files, button_colors):

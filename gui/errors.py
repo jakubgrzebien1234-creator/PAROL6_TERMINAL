@@ -10,7 +10,7 @@ class ErrorsView(flet.Container):
         "E2": ("ERROR", "E-STOP Active - Emergency stop button pressed"),
         "E3": ("ERROR", "Syntax Error - Error detected in program"),
         "E4": ("ERROR", "Port Disconnected - No connection to robot"),
-        "E5": ("WARNING", "Limit Switch - Robot hit the limit switch"),
+        "W5": ("WARNING", "Limit Switch - Robot hit the limit switch"),
         "W1": ("WARNING", "Stop - STOP button pressed"),
         "W2": ("WARNING", "Safe Move - SAFETY button pressed"),
         # Temperature sensors 1-4
@@ -31,6 +31,7 @@ class ErrorsView(flet.Container):
         "EMM6": ("ERROR", "Error Missing Motor 6 - Motor 6 not responding"),
         # Kinematics & Range errors
         "IKE": ("ERROR", "Inverse Kinematics Error - Position unreachable"),
+        "OOR": ("WARNING", "Out of Reach - Target exceeds reach limits"),
         "OOR1": ("ERROR", "Out Of Range Joint 1 - Joint angle exceeds limits"),
         "OOR2": ("ERROR", "Out Of Range Joint 2 - Joint angle exceeds limits"),
         "OOR3": ("ERROR", "Out Of Range Joint 3 - Joint angle exceeds limits"),
@@ -73,9 +74,8 @@ class ErrorsView(flet.Container):
     def __init__(self, uart_communicator=None, on_status_change=None):
         super().__init__()
         self.uart = uart_communicator
-        self.on_status_change = on_status_change # Callback: function(is_error: bool)
+        self.on_status_change = on_status_change 
         
-        # Track active alarms: {code: (container, timestamp_text)}
         self.active_alarms = {}
         
         # --- MAIN SETTINGS ---
@@ -177,12 +177,12 @@ class ErrorsView(flet.Container):
             text_color = colors.AMBER_200
             bg_color = "#4d3b00"
             self._update_alert_status("WARNING") 
-        else: # INFO
+        else: 
             icon_name = icons.INFO_OUTLINE
             icon_color = colors.BLUE_400
             text_color = colors.BLUE_200
             bg_color = "#0d1f33"
-            # INFO notification? Usually no alert for INFO.
+          
 
         log_row = Container(
             content=Row(
@@ -209,7 +209,6 @@ class ErrorsView(flet.Container):
             self.logs_list_view.update()
 
     def _clear_logs(self, e):
-        # NOTE: User requested this button SHOULD NOT reset error state, only clear text.
         self.logs_list_view.controls.clear()
         self.active_alarms.clear()  
         
@@ -226,7 +225,6 @@ class ErrorsView(flet.Container):
             self.status_text.color = colors.GREEN_400
             self.header_panel.border = border.all(1, colors.GREEN_900)
             
-            # Notify main app that error is cleared
             if self.on_status_change:
                 self.on_status_change("NONE") 
         else:
@@ -235,20 +233,11 @@ class ErrorsView(flet.Container):
             self.status_text.value = "ERRORS DETECTED"
             self.status_text.color = colors.RED_500
             self.header_panel.border = border.all(1, colors.RED_500)
-            
-            # Notify main app about error/warning type
-            # We need to determine if it's ERROR or WARNING based on checking active alarms?
-            # Ideally we pass 'level' to _set_system_status.
-            # But here we only have the generic call. 
-            # Let's check active alarms highest severity or just rely on what triggered it.
-            # Simpler: we modify call sites to pass the level or 'ERROR' by default.
-            pass # See add_log modifications below
+        
+            pass 
 
     def _update_alert_status(self, level):
-        """
-        Updates the internal status and notifies callback with 'ERROR', 'WARNING', or 'NONE'.
-        This replaces/augments _set_system_status logic for external notification.
-        """
+
         if level == "NONE":
             self.status_icon.name = icons.CHECK_CIRCLE
             self.status_icon.color = colors.GREEN_400
@@ -281,7 +270,6 @@ class ErrorsView(flet.Container):
         code = code.strip().upper()
         timestamp = datetime.now().strftime("%H:%M:%S")
         
-        # Check if this alarm is already active - just update timestamp
         if code in self.active_alarms:
             timestamp_text = self.active_alarms[code]
             timestamp_text.value = f"[{timestamp}]"
@@ -289,20 +277,16 @@ class ErrorsView(flet.Container):
                 timestamp_text.update()
             return
         
-        # New alarm - create entry
         if code in self.ERROR_CODES:
             level, message = self.ERROR_CODES[code]
             self._add_alarm_log(code, level, f"[{code}] {message}")
         else:
-            # Unknown code - still log it
             self.add_log("WARNING", f"Unknown code: {code}")
     
     def _add_alarm_log(self, code: str, level: str, message: str):
         """Add an alarm log entry and track it for deduplication."""
         timestamp = datetime.now().strftime("%H:%M:%S")
         
-        # Color configuration based on error level
-        # Color configuration based on error level
         if level == "ERROR":
             icon_name = icons.ERROR_OUTLINE
             icon_color = colors.RED_400
@@ -315,13 +299,12 @@ class ErrorsView(flet.Container):
             text_color = colors.AMBER_200
             bg_color = "#4d3b00"
             self._update_alert_status("WARNING")
-        else:  # INFO
+        else:  
             icon_name = icons.INFO_OUTLINE
             icon_color = colors.BLUE_400
             text_color = colors.BLUE_200
             bg_color = "#0d1f33"
         
-        # Create timestamp text reference for later updates
         timestamp_text = Text(f"[{timestamp}]", color=colors.GREY_500, size=12, weight="bold")
         
         log_row = Container(
@@ -341,31 +324,22 @@ class ErrorsView(flet.Container):
             border=border.only(left=border.BorderSide(4, icon_color))
         )
         
-        # Track this alarm
         self.active_alarms[code] = timestamp_text
-        
-        # Add to list
+
         self.logs_list_view.controls.append(log_row)
         
         if self.logs_list_view.page:
             self.logs_list_view.update()
 
     def send_error_code(self, code: str):
-        """
-        Send an error code via UART and also display it locally.
-        Use this when the application triggers an error/warning.
-        """
+
         code = code.strip().upper()
-        
-        # Display locally
         self.handle_error_code(code)
         
-        # Send via UART if connected
         if self.uart and self.uart.is_open():
             self.uart.send_message(code)
 
     def _reset_robot_errors(self, e):
-        """Sends the command to reset robot errors AND clears error state locally."""
         # 1. Clear local error state
         self._update_alert_status("NONE")
         self.active_alarms.clear()
@@ -375,6 +349,6 @@ class ErrorsView(flet.Container):
 
         # 3. Send command
         if self.uart and self.uart.is_open():
-            self.uart.send_message("ROBOT_OK") # Changed from COLLISION_OK as requested
+            self.uart.send_message("ROBOT_OK") 
         else:
             self.add_log("WARNING", "Cannot send reset command: UART disconnected.")

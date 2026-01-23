@@ -16,7 +16,7 @@
             "level": "ERROR",
             "message": "Port Disconnected - No connection to robot"
         },
-        "E5": {
+        "W5": {
             "level": "WARNING",
             "message": "Limit Switch - Robot hit the limit switch"
         },
@@ -223,7 +223,7 @@
             "E2",
             "E3",
             "E4",
-            "E5",
+            "W5",
             "W1",
             "W2"
         ],
