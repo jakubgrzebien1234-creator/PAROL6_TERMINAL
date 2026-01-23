@@ -1,1 +1,4 @@
-start
+Terminal APP for PAROL6
+
+use pip install -r requirements.txt
+
